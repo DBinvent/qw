@@ -1,0 +1,271 @@
+# QW skill tag synonyms
+#
+# Purpose: normalize free-text skill input to a canonical tag BEFORE signing.
+# Fragmentation is unrecoverable once tags are in signed records — you cannot
+# retroactively merge "nodejs" and "node.js" across everyone's history.
+#
+# Resolution order (client-side, at contract composition):
+#   1. lowercase, trim, collapse whitespace to "-"
+#   2. strip version suffix after "@" (keep as optional qualifier)
+#   3. exact match against canonical keys in taxonomy.yaml -> accept
+#   4. exact match against an alias below -> rewrite to canonical
+#   5. no match -> accept as unrouted tag, flag for taxonomy review
+#
+# Note: version-bearing aliases (angular2, vuejs3, python3) resolve to the
+# unversioned canonical. Version belongs in contract text, not the tag.
+#
+# Seeding: Stack Exchange publishes a tag synonym table and co-occurrence data.
+# Import it to expand this file rather than curating by hand.
+
+version: 1
+updated: 2026-08-06
+
+synonyms:
+
+  # --- languages ---
+  rust: [rust-lang, rustlang]
+  go: [golang, go-lang]
+  python: [python3, python2, py]
+  javascript: [js, ecmascript, es6, es2015, vanilla-js]
+  typescript: [ts]
+  csharp: [c#, "c-sharp", dotnet-csharp]
+  cpp: ["c++", cplusplus, "c++17", "c++20"]
+  c-embedded: [embedded-c, c-language]
+  java: [java8, java11, java17, java21, jdk]
+  kotlin: [kotlin-lang]
+  nodejs: [node, "node.js", node-js]
+  php: [php7, php8]
+  ruby: [ruby-lang]
+  scala: [scala3]
+  elixir: [elixir-lang]
+  objective-c: [objc, "objective c"]
+  swift: [swift-lang, swift5]
+
+  # --- frontend ---
+  react: [reactjs, "react.js", react18, react19]
+  angular: [angular2, angularjs, angular-js, angular15, angular17, ng]
+  vue: [vuejs, "vue.js", vue3, vue2]
+  svelte: [sveltejs, sveltekit]
+  nextjs: ["next.js", next]
+  nuxt: ["nuxt.js", nuxtjs]
+  css: [css3, scss, sass, less, tailwind, tailwindcss]
+  html: [html5, markup]
+  web-components: [custom-elements, lit, stencil]
+  state-management: [redux, mobx, zustand, pinia, ngrx]
+  responsive-design: [mobile-first, media-queries]
+  accessibility: [a11y, wcag, aria, screen-reader]
+  i18n: [internationalization, l10n, localization]
+
+  # --- backend / api ---
+  rest-api: [rest, restful, restful-api, http-api]
+  graphql: [gql, apollo]
+  grpc: [protobuf, protocol-buffers, rpc]
+  microservices: [micro-services, service-oriented, soa]
+  event-driven: [event-sourcing, pub-sub, cqrs]
+  message-queue: [rabbitmq, sqs, nats, activemq, amqp]
+  spring: [spring-boot, springboot, spring-framework]
+  django: [django-rest-framework, drf]
+  fastapi: [fast-api]
+  rails: [ruby-on-rails, ror]
+  dotnet: [".net", asp.net, aspnet, "asp.net-core"]
+  nestjs: ["nest.js"]
+  caching: [redis-cache, memcached, cdn-caching]
+
+  # --- database ---
+  postgresql: [postgres, pgsql, psql, pg]
+  mysql: [mariadb]
+  mongodb: [mongo, nosql-document]
+  redis: [valkey]
+  sqlite: [sqlite3]
+  query-optimization: [query-tuning, explain-plan, slow-query, sql-tuning]
+  schema-design: [data-modeling-db, normalization, er-modeling, ddl]
+  replication: [streaming-replication, logical-replication, read-replica]
+  high-availability: [ha, failover, patroni]
+  backup-recovery: [pitr, point-in-time-recovery, pg-dump, disaster-recovery]
+  migration: [schema-migration, flyway, liquibase, alembic, db-migration]
+  connection-pooling: [pgbouncer, pgpool, hikaricp]
+  sharding: [horizontal-partitioning, citus]
+  clustering: [db-cluster, multi-master]
+
+  # --- data ---
+  sql: [tsql, plpgsql, ansi-sql]
+  etl: [elt, data-pipeline, data-ingestion]
+  spark: [pyspark, apache-spark]
+  airflow: [apache-airflow, dag]
+  kafka: [apache-kafka, kafka-streams]
+  dbt: [data-build-tool]
+  bi: [business-intelligence, tableau, looker, powerbi, metabase, superset]
+  warehouse: [data-warehouse, dwh]
+  lakehouse: [data-lake, delta-lake, iceberg]
+  ab-testing: [split-testing, a-b-testing]
+  experimentation: [experiment-design, causal-inference]
+
+  # --- ml / ai ---
+  pytorch: [torch, pytorch-lightning]
+  tensorflow: [tf, keras]
+  scikit-learn: [sklearn]
+  deep-learning: [neural-networks, dnn, cnn, transformer]
+  nlp: [natural-language-processing, text-mining]
+  computer-vision: [cv, image-processing, object-detection]
+  llm: [large-language-model, gpt, generative-ai, genai]
+  rag: [retrieval-augmented-generation, vector-search, semantic-search]
+  fine-tuning: [lora, peft, instruction-tuning]
+  embeddings: [vector-embeddings, sentence-transformers]
+  agents: [ai-agents, agentic, tool-use]
+  mlops: [ml-ops, model-lifecycle]
+  model-serving: [inference, triton, vllm, model-deployment]
+  recommender-systems: [recsys, recommendation-engine]
+  time-series: [forecasting, arima, prophet]
+
+  # --- infra / cloud ---
+  aws: [amazon-web-services, ec2, s3, lambda]
+  gcp: [google-cloud, google-cloud-platform]
+  azure: [microsoft-azure]
+  cloudflare: [cf-workers, cloudflare-workers, r2]
+  kubernetes: [k8s, k3s, eks, gke, aks, openshift]
+  docker: [containers, containerization, podman, oci]
+  terraform: [tf-iac, opentofu, hcl]
+  ansible: [configuration-management]
+  ci-cd: [cicd, continuous-integration, continuous-deployment, pipeline]
+  github-actions: [gh-actions, workflow-automation]
+  gitops: [argocd, fluxcd]
+  linux: [ubuntu, debian, rhel, centos, arch-linux, nixos]
+  systemd: [init-system, service-management]
+  networking: [tcp-ip, routing, firewall, vpn, nat]
+  dns: [bind, dnssec, resolver]
+  self-hosting: [homelab, on-premise, bare-metal-hosting]
+  serverless: [faas, cloud-functions]
+  virtualization: [kvm, proxmox, vmware, qemu, hypervisor]
+
+  # --- ops ---
+  sre: [site-reliability, reliability-engineering]
+  monitoring: [alerting, uptime, healthcheck]
+  logging: [log-aggregation, elk, loki, fluentd]
+  tracing: [distributed-tracing, jaeger, apm]
+  opentelemetry: [otel]
+  prometheus: [promql]
+  grafana: [dashboards-ops]
+  incident-response: [postmortem, incident-management, runbook]
+  on-call: [oncall, pager, pagerduty]
+  capacity-planning: [scaling, load-planning]
+
+  # --- security ---
+  appsec: [application-security, secure-development]
+  pentest: [penetration-testing, ethical-hacking, offensive-security]
+  threat-modeling: [attack-surface, stride]
+  applied-crypto: [cryptography, encryption, tls, ssl]
+  pki: [certificates, x509, certificate-authority, acme]
+  key-management: [kms, hsm, secrets-management, vault]
+  zero-knowledge: [zk, zkp, zk-snark]
+  iam: [identity-management, oauth, oidc, saml, sso, rbac]
+  compliance: [audit, iso27001, pci-dss]
+  gdpr: [data-protection, privacy-compliance, ccpa]
+  soc2: [soc-2, soc2-type2]
+  vulnerability-research: [cve, exploit-development, bug-bounty]
+  reverse-engineering: [re, binary-analysis, disassembly]
+  sast: [static-analysis-security, dast, code-scanning]
+  dependency-scanning: [sca, supply-chain-security, sbom]
+
+  # --- embedded ---
+  rtos: [freertos, zephyr, real-time-os]
+  bare-metal: [baremetal, no-std]
+  arm: [cortex-m, arm64, aarch64]
+  riscv: [risc-v]
+  esp32: [esp8266, espressif]
+  can-bus: [canbus, can, obd2, j1939]
+  ble: [bluetooth-low-energy, bluetooth]
+  lorawan: [lora]
+  pcb-design: [kicad, altium, schematic-capture]
+  fpga: [vhdl, xilinx, lattice]
+  firmware: [embedded-firmware, bootloader]
+  sensors: [imu, adc, telemetry]
+
+  # --- distributed / p2p ---
+  dht: [distributed-hash-table, kademlia]
+  gossip: [gossip-protocol, epidemic-protocol]
+  libp2p: [ipfs, peer-to-peer, p2p]
+  nostr: [nostr-protocol, nip]
+  holochain: [hApp, holochain-zome]
+  atproto: [at-protocol, bluesky]
+  crdt: [conflict-free-replicated-data, automerge, yjs]
+  raft: [consensus-raft, etcd-consensus]
+  eventual-consistency: [eventual-consistency-model, anti-entropy]
+  nat-traversal: [stun, turn, ice, hole-punching]
+  smart-contracts: [solidity, evm, web3-contracts]
+  cryptoeconomics: [token-design, mechanism-design]
+  byzantine-fault-tolerance: [bft, pbft]
+
+  # --- qa ---
+  test-automation: [automated-testing, e2e-testing, integration-testing]
+  playwright: [puppeteer]
+  cypress: [cypress-io]
+  performance-testing: [benchmarking, profiling]
+  load-testing: [stress-testing, k6, jmeter, locust]
+  fuzzing: [fuzz-testing, afl, libfuzzer]
+  property-testing: [quickcheck, proptest, hypothesis]
+  contract-testing: [pact, api-contract-test]
+  manual-qa: [exploratory-testing, test-plan]
+
+  # --- design ---
+  ux: [user-experience, ux-design]
+  ui: [user-interface, ui-design, visual-design]
+  figma: [sketch, adobe-xd, penpot]
+  design-systems: [component-library, style-guide, design-tokens]
+  prototyping: [wireframing, mockup, lo-fi-prototype]
+  user-research: [ux-research, contextual-inquiry]
+  usability-testing: [user-testing]
+  information-architecture: [ia, sitemap, navigation-design]
+  branding: [brand-identity, logo-design]
+  motion-design: [animation-design, after-effects]
+
+  # --- product ---
+  roadmapping: [roadmap, product-roadmap]
+  requirements: [requirements-gathering, prd, user-stories]
+  prioritization: [backlog-grooming, rice, moscow]
+  spec-writing: [product-spec, functional-spec, rfc-writing]
+  market-research: [market-analysis, tam-sam-som]
+  competitive-analysis: [competitor-research]
+  user-interviews: [customer-discovery, jobs-to-be-done]
+  analytics-product: [product-analytics, amplitude, mixpanel]
+
+  # --- docs / devrel ---
+  technical-writing: [tech-writing, documentation, docs-writing]
+  api-documentation: [openapi, swagger, api-reference, api-spec]
+  tutorials: [how-to-guides, getting-started]
+  developer-guides: [dev-docs, integration-guide]
+  editing: [copy-editing, proofreading]
+  translation: [localization-content]
+  developer-advocacy: [devrel, developer-evangelism]
+  community-management: [community-building]
+  conference-talks: [public-speaking, presentations]
+  workshops: [training, teaching, mentoring]
+  moderation: [community-moderation, forum-moderation]
+
+  # --- compilers / tooling ---
+  parser: [parsing, lexer, grammar, peg, antlr]
+  type-systems: [type-checking, type-inference]
+  code-generation: [codegen, macro, metaprogramming]
+  static-analysis: [linting, code-analysis]
+  linter: [eslint, clippy, ruff, formatter]
+  language-server: [lsp, ide-tooling]
+  build-systems: [bazel, make, cmake, cargo, gradle, webpack, vite]
+
+  # --- graphics / games ---
+  opengl: [glsl]
+  vulkan: [vulkan-api]
+  webgl: [webgpu, threejs, "three.js"]
+  shaders: [shader-programming, hlsl]
+  ray-tracing: [raytracing, path-tracing]
+  gpu-compute: [cuda, opencl, compute-shaders]
+  unity: [unity3d]
+  unreal: [unreal-engine, ue5]
+  godot: [godot-engine, gdscript]
+  bevy: [bevy-engine]
+  physics-simulation: [rigid-body, collision-detection]
+
+  # --- legal-ops ---
+  licensing: [open-source-license, gpl, mit-license, apache-license, license-audit]
+  open-source-compliance: [oss-compliance, license-compatibility]
+  contract-review: [agreement-review, terms-review]
+  privacy-policy: [privacy-notice, dpa]
+  patent-review: [prior-art, ip-review]

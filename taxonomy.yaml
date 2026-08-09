@@ -1,0 +1,188 @@
+# QW skill taxonomy
+#
+# Levels:
+#   1. sector   — top of tree (it). Reserved for future siblings.
+#   2. domain   — trust scope. An endorsement is scoped here.
+#   3. area     — routing bucket. Optional; omit where a domain is narrow.
+#   4. skills   — leaf tags. Open set: unknown values are legal but unroutable
+#                 until added or resolved via synonyms.yaml.
+#
+# Rules:
+#   - Tag format: sector/domain[/area]#skill  e.g. it/backend/languages#rust
+#   - Domains are a closed enum. Adding one is a protocol change.
+#   - Skills are open. Normalize through synonyms.yaml before signing.
+#   - No version numbers in skills. Use the optional @ qualifier if needed
+#     (rust@1.8x), which matching ignores by default.
+#   - Max 5 skill tags per contract.
+
+version: 1
+updated: 2026-08-06
+
+sectors:
+  it:
+    label: Information Technology
+    domains:
+
+      backend:
+        label: Backend Development
+        areas:
+          languages:
+            skills: [rust, go, java, kotlin, python, csharp, nodejs, ruby, php, elixir, scala, cpp]
+          frameworks:
+            skills: [spring, django, fastapi, rails, dotnet, axum, actix, nestjs, laravel, phoenix]
+          patterns:
+            skills: [rest-api, graphql, grpc, microservices, event-driven, message-queue, caching, api-design]
+
+      frontend:
+        label: Frontend Development
+        areas:
+          frameworks:
+            skills: [react, angular, vue, svelte, solid, htmx, nextjs, nuxt, remix]
+          fundamentals:
+            skills: [typescript, javascript, css, html, wasm, web-components]
+          craft:
+            skills: [accessibility, responsive-design, animation, state-management, performance-web, i18n]
+
+      mobile:
+        label: Mobile Development
+        areas:
+          native:
+            skills: [swift, swiftui, kotlin-android, jetpack-compose, objective-c]
+          cross-platform:
+            skills: [flutter, react-native, tauri, capacitor, kotlin-multiplatform]
+          platform:
+            skills: [ios, android, app-store-release, push-notifications, offline-first]
+
+      data:
+        label: Data Engineering & Analytics
+        areas:
+          engineering:
+            skills: [etl, spark, airflow, dbt, kafka, flink, data-modeling, streaming]
+          analytics:
+            skills: [sql, bi, dashboards, experimentation, ab-testing, metrics-design]
+          storage:
+            skills: [warehouse, lakehouse, clickhouse, snowflake, bigquery, duckdb]
+
+      database:
+        label: Databases
+        areas:
+          engines:
+            skills: [postgresql, mysql, sqlite, mongodb, redis, cassandra, cockroachdb]
+          operations:
+            skills: [replication, clustering, backup-recovery, migration, high-availability, sharding]
+          performance:
+            skills: [query-optimization, indexing, schema-design, connection-pooling, partitioning]
+
+      ml:
+        label: Machine Learning & AI
+        areas:
+          modeling:
+            skills: [pytorch, tensorflow, jax, scikit-learn, deep-learning, reinforcement-learning]
+          applied:
+            skills: [nlp, computer-vision, recommender-systems, time-series, speech]
+          llm:
+            skills: [prompt-engineering, rag, fine-tuning, embeddings, agents, evaluation]
+          mlops:
+            skills: [model-serving, feature-store, experiment-tracking, model-monitoring]
+
+      infra:
+        label: Infrastructure & Platform
+        areas:
+          cloud:
+            skills: [aws, gcp, azure, hetzner, cloudflare, self-hosting]
+          orchestration:
+            skills: [kubernetes, docker, nomad, helm, serverless]
+          automation:
+            skills: [terraform, ansible, pulumi, ci-cd, github-actions, gitops]
+          systems:
+            skills: [linux, networking, dns, bsd, systemd, virtualization]
+
+      ops:
+        label: Operations & Reliability
+        areas:
+          reliability:
+            skills: [sre, incident-response, on-call, capacity-planning, chaos-engineering]
+          observability:
+            skills: [monitoring, logging, tracing, prometheus, grafana, opentelemetry]
+
+      security:
+        label: Security
+        areas:
+          appsec:
+            skills: [threat-modeling, secure-coding, dependency-scanning, sast, code-audit]
+          offensive:
+            skills: [pentest, red-team, vulnerability-research, reverse-engineering]
+          cryptography:
+            skills: [applied-crypto, pki, key-management, protocol-design, zero-knowledge]
+          governance:
+            skills: [iam, compliance, soc2, gdpr, threat-intel]
+
+      embedded:
+        label: Embedded & Hardware
+        areas:
+          firmware:
+            skills: [c-embedded, rtos, bare-metal, arm, riscv, esp32]
+          protocols:
+            skills: [can-bus, i2c, spi, modbus, ble, lorawan]
+          hardware:
+            skills: [pcb-design, fpga, verilog, sensors, power-electronics]
+
+      distributed:
+        label: Distributed & P2P Systems
+        areas:
+          consensus:
+            skills: [raft, paxos, crdt, eventual-consistency, byzantine-fault-tolerance]
+          p2p:
+            skills: [dht, gossip, libp2p, nostr, holochain, atproto, nat-traversal]
+          blockchain:
+            skills: [smart-contracts, solidity, cryptoeconomics, zk-proofs]
+
+      qa:
+        label: Quality Engineering
+        areas:
+          automation:
+            skills: [test-automation, playwright, cypress, selenium, contract-testing]
+          specialized:
+            skills: [performance-testing, load-testing, fuzzing, property-testing, manual-qa]
+
+      design:
+        label: Design
+        areas:
+          product-design:
+            skills: [ux, ui, interaction-design, prototyping, figma, design-systems]
+          research:
+            skills: [user-research, usability-testing, information-architecture]
+          visual:
+            skills: [branding, illustration, motion-design, typography]
+
+      product:
+        label: Product Management
+        areas:
+          discovery:
+            skills: [user-interviews, requirements, market-research, competitive-analysis]
+          delivery:
+            skills: [roadmapping, prioritization, spec-writing, release-planning, analytics-product]
+
+      docs:
+        label: Documentation & Technical Writing
+        skills: [technical-writing, api-documentation, tutorials, developer-guides, editing, translation]
+
+      devrel:
+        label: Developer Relations & Community
+        skills: [developer-advocacy, community-management, conference-talks, workshops, sample-code, moderation]
+
+      compilers:
+        label: Compilers & Language Tooling
+        skills: [parser, type-systems, code-generation, static-analysis, linter, language-server, build-systems]
+
+      graphics:
+        label: Graphics & Game Development
+        areas:
+          rendering:
+            skills: [opengl, vulkan, webgl, shaders, ray-tracing, gpu-compute]
+          engines:
+            skills: [unity, unreal, godot, bevy, physics-simulation]
+
+      legal-ops:
+        label: Legal & Compliance Support
+        skills: [licensing, open-source-compliance, contract-review, privacy-policy, patent-review]
