@@ -295,6 +295,27 @@ since it's demoable standalone and is the differentiator.
       direct one — the opposite of "decay with distance." Fixed to score
       only the closing edge's value, discounted by `hop_decay^(hops-1)`;
       earlier edges affect the score only via that exponent.)
+- [ ] **Calculator profile** (added 2026-08-10, from conversation): attach
+      an explicit, referenceable "who computed this and under what
+      parameters" profile to a computed score, not just the raw number
+      `ScoringWeights`/`score_trust_path` produce today. A profile would
+      record at minimum (viewer pubkey, weights used, timestamp), signed
+      by whoever ran the calculation (self, or the broker from §8) — so a
+      score can be:
+      - **Compared**: two scores are only meaningfully comparable if the
+        reader knows they came from the same (or an equivalent) profile —
+        `ScoringWeights` today is purely local/ephemeral, nothing external
+        can tell one score's recipe from another's.
+      - **Transponded**: forwarded to a third party who wasn't the
+        original viewer, who can then judge how much to trust the score
+        *given* who calculated it and for whom, instead of treating it as
+        an opaque, context-free number.
+      Same tension as the broker-signed-score item in §8, and needs the
+      same decision alongside it: a shareable calculator profile is
+      exactly what a portable/transponded score needs, but standardized,
+      reused profiles are also exactly what could turn "locally-computed,
+      per-viewer trust" (§0) into a de facto global score. Resolve both
+      together, not independently.
 - [x] `net_position` as a pure derived query: `Σ(delivered) − Σ(issued)` from
       dual-indexed public records — no separate balance store, ever.
       (`net_position` / `net_position_with` (bilateral) — only counts
@@ -337,6 +358,15 @@ matching and `protocol` is the lower crate; `qw_node::routing` now re-exports it
 is the same mechanism as the audit-request/audit-opinion dispute
 annotations already speced in NIP-QW04 (§2) — confirms the existing
 design, no new event kind needed.
+
+`qw-design-faq.md` §5 gained a worked bot-farm example (added 2026-08-10,
+from conversation, "Can a bot-farm operator just pay themselves a huge
+balance?") — a million-bot farm can inflate its own internal balance for
+free, but that balance is only redeemable inside the farm; borrowing
+reputation against a real outside counterparty is what exposes a signer to
+being flagged, and cascades to the whole farm in one shot. Same conclusion
+as this section, illustrated concretely — confirms the existing design
+again, no new mechanism needed.
 
 - [x] Implement flagging (any participant, any signed record) and the
       default cascade rule from §0.5.
@@ -474,6 +504,27 @@ efficiency/monetization layer, not a dependency.
 - [ ] Community insurance pool: explicitly last — depends on transaction
       volume existing first to fund the pool meaningfully.
       Deliberately unbuilt, matching the doc's own sequencing.
+- [ ] **Broker-signed score** (added 2026-08-10, from conversation, not yet
+      in the source docs): a coordination-server operator ("broker")
+      computes a score for a subject and signs it, so the subject can hold
+      and present it as a portable attestation elsewhere — distinct from
+      the chain-calculation service above, whose signed *path* the client
+      independently re-derives/spot-checks against raw relay data (the
+      server isn't trusted for the result, only for convenience). A
+      broker-signed score as portable evidence implies the *recipient*
+      trusts the broker's methodology instead of re-deriving it themselves
+      — closer to a credit-bureau attestation than to chain-calculation.
+      **Needs a decision before building**: §0 locks in "no global
+      reputation score, ever — only locally-computed, per-viewer trust" —
+      confirm this stays strictly per-requester/scoped (broker computes
+      *for* a specific asking party for use only, like rating-bureau in
+      this same section, not a single portable number the subject reuses
+      everywhere, which is functionally close to a global score by another
+      name) before adding it to the plan for real. Pairs with §5's
+      **Calculator profile** item — a broker-signed score needs exactly
+      that profile (who calculated it, for whom, under what weights)
+      attached to be interpretable/comparable by whoever it's presented
+      to; resolve the two together.
 - [x] Multi-server support in the client from day one (routing to whichever
       server a node's own trust config ranks best/cheapest) — avoids
       hard-coding a single server as authoritative.
@@ -605,3 +656,4 @@ total across the workspace, `cargo clippy`/`cargo fmt --check` clean.)
 6. §9 legal track — run in parallel starting now, gates external launch
 7. §10 pilot cohort launch
 8. §8 coordination server — only once organic usage justifies it
+

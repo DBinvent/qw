@@ -1,0 +1,7 @@
+name = "qw-landing"
+compatibility_date = "2024-09-23"
+
+# Static-only Worker — `next build` (output: 'export') writes the site to ./out,
+# and Workers Static Assets serves it directly. No server-side code, no bindings.
+[assets]
+directory = "./out"
