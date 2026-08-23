@@ -1,3 +1,6 @@
 /doc-link/
 .c*
 /target/
+# CocoIndex Code (ccc)
+/.cocoindex_code/
+/Cargo.lock

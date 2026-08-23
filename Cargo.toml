@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["protocol", "node", "server"]
+members = ["protocol", "node"]
 
 [workspace.package]
 edition = "2021"
