@@ -6,6 +6,64 @@ Nostr. See `todo-impl.md` for the implementation plan and current status.
 **Status:** early prototype (protocol layer + a local referral-routing
 demo). Nothing here is ready for real transactions or real personal data.
 
+## Try it
+
+Rust stable, no services, no network. Everything below runs locally and
+publishes nothing anywhere — there is no relay and no public gateway yet,
+so this is a developer path, not a way to join a running network. What
+joining *will* mean is below.
+
+```sh
+cargo test --workspace
+cargo run -p qw-node --example referral_demo
+cargo run -p qw-node --example bootstrap_from_git -- <path/to/a/git/repo>
+```
+
+**`referral_demo [n] [skill_tag] [max_hops]`** builds a small-world contact
+graph of `n` synthetic nodes (300 by default), fires a skill query from a
+random one, and reports what greedy routing cost against a full-flood
+estimate:
+
+```
+First match at 1 hop(s); 34 total matches found within 3 hops, deduped by pubkey
+Messages sent: 93 queries, 113 answers
+Naive full-flood estimate at avg degree ~5 over 3 hops: ~125 messages
+```
+
+It is a demo, not a statistical claim — the graph generator is untuned and
+run once. See NIP-QW06's scope note.
+
+**`bootstrap_from_git [repo_path]`** reads a real repository's history and
+prints *candidates*: skill tags inferred from the file types a contributor
+touched, and `Introduction` pairs from `Co-authored-by:` trailers — real
+evidence that two people worked together. It signs and publishes nothing.
+Git identifies people by email, not by a QW key, and the tool holds nobody's
+signing key; each contributor generates their own identity and signs only
+what they confirm.
+
+## How joining works
+
+Not reachable yet — no relay, no gateway — but the mechanism is specified
+and implemented at the protocol layer, so it is worth stating plainly rather
+than leaving to a future FAQ:
+
+1. **Generate an identity.** `qw_protocol::identity::Identity::generate()` —
+   one secp256k1 keypair behind both a `did:key` controller id and a Nostr
+   pubkey.
+2. **Get introduced.** [NIP-QW07](protocol/nips/NIP-QW07-introduction.md),
+   kind `9060`. Either a *self-introduction* to someone you found (via a
+   [NIP-QW06](protocol/nips/NIP-QW06-referral-query.md) referral query or a
+   public gateway), or a *mutual introduction* where an existing contact
+   introduces you to another of theirs and carries the connecting chain. It
+   is signed either way, so the introducer's own reputation is behind it —
+   there is no open registration, by design.
+3. **Publish what you can do.**
+   [NIP-QW03](protocol/nips/NIP-QW03-profile-skill-tags.md) skill tags, with
+   completed contracts as the evidence behind them.
+
+The contact graph is the membership list; there is nothing else to sign up
+to.
+
 ## Legal notices
 
 Read these before publishing anything through this protocol, and before

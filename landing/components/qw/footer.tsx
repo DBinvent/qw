@@ -1,7 +1,6 @@
 import { QwLogo } from './logo'
 import { SubscribeForm } from '@/components/news/subscribe-form'
-
-const GITHUB_URL = 'https://github.com/DBinvent/qw'
+import { SOURCE_LABEL, SOURCE_URL } from '@/lib/links'
 
 export function Footer() {
   return (
@@ -32,8 +31,8 @@ export function Footer() {
             <a href="#faq" className="hover:text-foreground">
               FAQ
             </a>
-            <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer" className="hover:text-foreground">
-              GitHub
+            <a href={SOURCE_URL} target="_blank" rel="noopener noreferrer" className="hover:text-foreground">
+              {SOURCE_LABEL}
             </a>
           </nav>
         </div>

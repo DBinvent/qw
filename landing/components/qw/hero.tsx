@@ -1,6 +1,5 @@
 import { ArrowRight, ExternalLink } from 'lucide-react'
-
-const GITHUB_URL = 'https://github.com/DBinvent/qw'
+import { SOURCE_LABEL, SOURCE_URL } from '@/lib/links'
 
 export function Hero() {
   return (
@@ -24,13 +23,13 @@ export function Hero() {
 
         <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
           <a
-            href={GITHUB_URL}
+            href={SOURCE_URL}
             target="_blank"
             rel="noopener noreferrer"
             className="glow-violet inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-primary px-5 text-sm font-medium text-primary-foreground transition-transform hover:-translate-y-px"
           >
             <ExternalLink className="size-4" />
-            View source
+            {SOURCE_LABEL}
           </a>
           <a
             href="#architecture"

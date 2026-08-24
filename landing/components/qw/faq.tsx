@@ -1,6 +1,5 @@
 import { ChevronDown } from 'lucide-react'
-
-const FAQ_DOC_URL = 'https://github.com/vkrinitsyn/vkrinitsyn.github.io/blob/master/qw/qw-design-faq.md'
+import { FAQ_DOC_URL } from '@/lib/links'
 
 const faqs = [
   {

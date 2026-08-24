@@ -4,8 +4,7 @@ import { useState } from 'react'
 import { Menu, X } from 'lucide-react'
 import { QwLogo } from './logo'
 import { cn } from '@/lib/utils'
-
-const GITHUB_URL = 'https://github.com/DBinvent/qw'
+import { SOURCE_LABEL, SOURCE_URL } from '@/lib/links'
 
 const navLinks = [
   { label: 'Architecture', href: '/#architecture' },
@@ -32,12 +31,12 @@ export function SiteHeader() {
 
         <div className="flex items-center gap-3">
           <a
-            href={GITHUB_URL}
+            href={SOURCE_URL}
             target="_blank"
             rel="noopener noreferrer"
             className="glow-violet hidden rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-transform hover:-translate-y-px sm:inline-flex"
           >
-            View on GitHub
+            {SOURCE_LABEL}
           </a>
           <button
             type="button"
@@ -64,13 +63,13 @@ export function SiteHeader() {
             </a>
           ))}
           <a
-            href={GITHUB_URL}
+            href={SOURCE_URL}
             target="_blank"
             rel="noopener noreferrer"
             onClick={() => setOpen(false)}
             className="mt-1 rounded-lg bg-primary px-4 py-2 text-center text-sm font-medium text-primary-foreground"
           >
-            View on GitHub
+            {SOURCE_LABEL}
           </a>
         </nav>
       </div>

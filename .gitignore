@@ -8,3 +8,5 @@
 /.idea/modules.xml
 /.idea/qw.iml
 /.idea/vcs.xml
+# local scratch file, was tracked by mistake
+/test.md

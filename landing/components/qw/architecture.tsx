@@ -1,4 +1,5 @@
 import { Clock, GitBranch, KeyRound, Network, ScrollText, ShieldCheck } from 'lucide-react'
+import { ABSTRACT_URL } from '@/lib/links'
 
 const points = [
   {
@@ -75,7 +76,7 @@ export function Architecture() {
           Full design rationale — platform selection, mobile architecture, data model, privacy, and legal framing
           — lives in{' '}
           <a
-            href="https://github.com/vkrinitsyn/vkrinitsyn.github.io/blob/master/qw/abstract.md"
+            href={ABSTRACT_URL}
             target="_blank"
             rel="noopener noreferrer"
             className="text-primary hover:text-primary/80"
