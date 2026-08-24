@@ -4,3 +4,7 @@
 # CocoIndex Code (ccc)
 /.cocoindex_code/
 /Cargo.lock
+/.idea/.gitignore
+/.idea/modules.xml
+/.idea/qw.iml
+/.idea/vcs.xml

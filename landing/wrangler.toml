@@ -4,20 +4,16 @@ compatibility_date = "2024-09-23"
 
 # `next build` (output: 'export') writes the site to ./out and Workers Static
 # Assets serves it. The Worker itself runs for exactly one thing: forwarding
-# /api/news/* to qw-server so the footer signup box can reach the subscribers
-# table in the home Postgres. See src/worker.ts.
+# /api/news/* to the deployment's own API server, so the footer signup box has
+# somewhere to post. See src/worker.ts.
 [assets]
 directory = "./out"
 binding = "ASSETS"
 run_worker_first = ["/api/*"]
 
 [vars]
-# Internal ingress hostname on the shared home-services Cloudflare Tunnel,
-# pointing at qw-server (127.0.0.1:8110). Not linked publicly anywhere, only
-# ever reached through this Worker's fetch().
-#
-# NOT LIVE YET: the tunnel entry for this hostname is still commented out in
-# ../../raw/cloudflared-config.yml and has no DNS record, so the signup box
-# will fail until `cloudflared tunnel route dns home-services
-# qw-dash-api.knownby.work` is run and the config applied.
+# API origin this Worker forwards /api/* to — the only backend the site has.
+# Reached server-side from the Worker, never from the page (see src/worker.ts),
+# so it needs no CORS. A fork running its own instance points this at its own
+# API server; nothing else in the repo depends on the value.
 BACKEND_ORIGIN = "https://qw-dash-api.knownby.work"

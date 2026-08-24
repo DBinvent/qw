@@ -18,9 +18,8 @@ export default {
     const url = new URL(request.url);
 
     if (url.pathname.startsWith("/api/")) {
-      // qw-server mounts the list at /news/*, knowing nothing about the /api
-      // prefix, so it is stripped here rather than forwarded — same rule as
-      // ../../qw-bo/dash/src/worker.ts.
+      // The API server mounts the list at /news/*, knowing nothing about the
+      // /api prefix, so it is stripped here rather than forwarded.
       const target = new URL(url.pathname.slice(4) + url.search, env.BACKEND_ORIGIN);
       return fetch(new Request(target.toString(), request));
     }
