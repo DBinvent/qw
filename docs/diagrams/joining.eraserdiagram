@@ -1,0 +1,34 @@
+// QW — how someone joins the network.
+// Source of truth: protocol/nips/NIP-QW07-introduction.md (kind 9060),
+// NIP-QW06 (9050/9051), NIP-QW03 (skill tags), protocol/src/identity.rs.
+// There is no registration endpoint anywhere in this picture — that is the
+// point of it.
+
+title Joining QW
+
+Newcomer [icon: user, color: violet]
+Hop1 [icon: user-check, label: "Contact (hop 1)"]
+Network [icon: share-2, label: "Contact graph"]
+
+Newcomer > Newcomer: Identity::generate()\nsecp256k1 -> did:key + Nostr pubkey
+
+opt [label: "found someone first — NIP-QW06"] {
+  Newcomer > Hop1: private ask (out of propagation scope)
+  Hop1 > Network: skill query 9050, signed by Hop1 about itself
+  Network > Hop1: skill answer 9051
+  Hop1 > Newcomer: candidate contacts
+}
+
+alt [label: "self-introduction"] {
+  Newcomer > Hop1: 9060 subject_pubkey == event.pubkey\nchain: []
+}
+else [label: "mutual introduction"] {
+  Hop1 > Network: 9060 subject_pubkey = Newcomer\nchain: connecting hops, oldest first
+}
+
+Newcomer > Network: 9020 profile skill tags\nevidence = completed contracts
+
+// Both shapes are signed, so the introducer's reputation is attached to the
+// claim. That is the whole admission control: an edge exists because someone
+// staked their name on it, not because a form was submitted.
+Network > Newcomer: edge exists — you are in the graph

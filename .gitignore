@@ -10,3 +10,4 @@
 /.idea/vcs.xml
 # local scratch file, was tracked by mistake
 /test.md
+/app/src-tauri/target/

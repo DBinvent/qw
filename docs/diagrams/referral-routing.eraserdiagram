@@ -1,0 +1,45 @@
+// QW — discovery is routing, not search.
+// Source of truth: protocol/nips/NIP-QW06-referral-query.md (9050/9051),
+// node/src/routing.rs, node/src/graph.rs.
+//
+// Two claims this diagram has to carry, both load-bearing:
+//   1. Greedy forwarding toward tag-similar contacts, fanout 2-3, reaches a
+//      match in ~log(N) hops. Flooding does not scale — the Gnutella number
+//      is 50 contacts x 3 hops = up to 125,000 messages for one question.
+//   2. Identity is revealed to hop 1 only. Every 9050 is signed by the
+//      relaying node *about itself*; walking the e-tag chain backward
+//      terminates at hop 1 and never reaches the requester.
+
+title Referral query — NIP-QW06
+
+Requester [shape: oval, icon: user, color: violet]
+
+Hop1 [icon: user-check, label: "Hop 1\nknows the requester"]
+
+Relays [label: "Greedy forwarding", color: blue] {
+  Hop2 [icon: user, label: "Hop 2\nsees: someone Hop 1 vouches for"]
+  Hop3 [icon: user, label: "Hop 3\nsees: two hops out, via Hop 2"]
+}
+
+Match [shape: oval, icon: check-circle, color: green, label: "Match\ncaches the skill tag"]
+TTL [shape: diamond, label: "hops_from_origin\n< max_hops?"]
+
+// The first exchange is private and direct — an application-level DM, out of
+// propagation scope. Nothing about it is broadcast, which is what makes the
+// chain head legitimate rather than a leak.
+Requester > Hop1: private ask (not a 9050)
+
+Hop1 > Hop2: 9050 chain head\nno e tag — nothing upstream is observable
+Hop2 > TTL: forward?
+TTL > Hop3: yes — 9050 with e tag "referral-hop" -> prior forward
+TTL > Hop2: no — drop, TTL exhausted
+Hop3 > Match: 9050, fanout 2-3 toward tag-similar contacts
+
+Match > Hop3: 9051 skill answer
+Hop3 > Hop2: 9051
+Hop2 > Hop1: 9051
+Hop1 > Requester: candidates, deduped by pubkey, with path count
+
+// Each edge caches its direct contacts' skill tags, so there is no index to
+// build, host or shard — and trust arrives with the path rather than from a
+// score attached to a stranger.

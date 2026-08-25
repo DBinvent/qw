@@ -1,0 +1,36 @@
+// QW — a contract from offer to credit.
+// Source of truth: protocol/nips/NIP-QW01-job-lifecycle.md (9000-9005) and
+// NIP-QW02-credit-issuance.md (9010).
+//
+// The property worth drawing: no step is atomic. Each one tolerates the other
+// party being offline indefinitely — that is the mobile reality the design
+// starts from, not a limitation of it. Completion is signed by each side
+// separately for the same reason.
+
+title Job lifecycle
+
+Client [icon: user, color: violet]
+Worker [icon: user, color: blue]
+
+Client > Worker: 9000 offer\nskill_tags, hours, rate, ko, km, terms
+
+loop [label: "until terms agree — either party, repeatable"] {
+  Worker > Client: 9004 counteroffer\nfull replacement set of terms, not a diff\ne tag -> superseded offer
+}
+
+Worker > Client: 9001 accept
+
+opt [label: "optional, either party"] {
+  Worker > Client: 9002 milestone
+}
+
+// Not a handshake: two independent signatures over the same completed work.
+// Neither waits for the other, and the record is the pair.
+Worker > Client: 9003 completion (worker's signature)
+Client > Worker: 9003 completion (client's signature)
+
+Client > Worker: 9010 credit issuance\nQuants = Hours x Rate x ko x km
+
+// ko: objective coefficient (equipment, conditions, hazard).
+// km: subjective motivation/quality coefficient.
+// Both may be null — negotiation is allowed to stay simple.

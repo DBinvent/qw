@@ -9,6 +9,11 @@ description = "QW client shell (Tauri v2) — a window over qw-client-core"
 # so making this a member would break `cargo test --workspace` on any machine
 # without them. See the note in ../../Cargo.toml.
 
+# Cargo walks up to ../../Cargo.toml and assumes membership unless told
+# otherwise; the empty table opts this crate out and gives it its own
+# lockfile, which is the entire point of keeping it outside.
+[workspace]
+
 [lib]
 name = "qw_app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
