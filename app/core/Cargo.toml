@@ -1,0 +1,19 @@
+[package]
+name = "qw-client-core"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "QW client core: on-disk identity, HTTP mailbox transport, invite-link flow — everything the app shell wraps, with no UI toolkit in the dependency tree"
+
+[dependencies]
+qw-protocol = { path = "../../protocol" }
+qw-node = { path = "../../node" }
+# rustls rather than native-tls: no OpenSSL dev package needed on a build
+# host, and this crate is meant to compile anywhere the shell might.
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+serde_json = "1.0.151"
+
+[dev-dependencies]
+axum = "0.7"
+tokio = { version = "1", features = ["rt-multi-thread", "net", "macros"] }
+tempfile = "3"

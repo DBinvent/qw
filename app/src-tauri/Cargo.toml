@@ -1,0 +1,26 @@
+[package]
+name = "qw-app"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "QW client shell (Tauri v2) — a window over qw-client-core"
+
+# NOT a workspace member: Tauri needs webkit2gtk-4.1 and friends to compile,
+# so making this a member would break `cargo test --workspace` on any machine
+# without them. See the note in ../../Cargo.toml.
+
+[lib]
+name = "qw_app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+qw-client-core = { path = "../core" }
+qw-node = { path = "../../node" }
+qw-protocol = { path = "../../protocol" }

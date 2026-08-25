@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>QW</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; padding: 2rem; background: #09090b; color: #e4e4e7;
+         font: 14px/1.6 ui-sans-serif, system-ui, sans-serif; }
+  h1 { font-size: 1.1rem; letter-spacing: .12em; text-transform: uppercase;
+       color: #a78bfa; margin: 0 0 1.5rem; }
+  section { border: 1px solid #27272a; border-radius: .6rem; padding: 1rem 1.25rem;
+            margin-bottom: 1rem; background: #111114; }
+  code, input { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; }
+  input { width: 100%; padding: .6rem; background: #09090b; color: inherit;
+          border: 1px solid #27272a; border-radius: .4rem; }
+  button { margin-top: .75rem; padding: .55rem 1.1rem; border: 0; border-radius: .4rem;
+           background: #7c3aed; color: white; font: inherit; cursor: pointer; }
+  .muted { color: #a1a1aa; }
+</style>
+</head>
+<body>
+  <h1>QW</h1>
+
+  <section>
+    <div class="muted">Your invite link — post it anywhere your work history already lives.</div>
+    <p><code id="link">…</code></p>
+    <button id="copy">Copy</button>
+  </section>
+
+  <section>
+    <div class="muted">Follow someone's link</div>
+    <p><input id="follow-input" placeholder="https://knownby.work/i/npub1…" spellcheck="false"></p>
+    <button id="follow">Follow</button>
+    <p class="muted" id="follow-status"></p>
+  </section>
+
+  <section>
+    <div class="muted">Mailbox</div>
+    <button id="sync">Sync now</button>
+    <p class="muted" id="sync-status">Not synced yet.</p>
+  </section>
+
+<script type="module">
+// Tauri v2 exposes invoke on window.__TAURI__ when withGlobalTauri is on;
+// this shell keeps the frontend dependency-free rather than pulling an npm
+// package in for one function.
+const invoke = window.__TAURI__.core.invoke;
+
+const me = await invoke('identity');
+document.getElementById('link').textContent = me.invite_link;
+document.getElementById('copy').onclick = () => navigator.clipboard.writeText(me.invite_link);
+
+document.getElementById('follow').onclick = async () => {
+  const status = document.getElementById('follow-status');
+  try {
+    await invoke('follow', { link: document.getElementById('follow-input').value });
+    status.textContent = 'Queued. It goes out on the next sync.';
+  } catch (e) {
+    status.textContent = String(e);
+  }
+};
+
+document.getElementById('sync').onclick = async () => {
+  const status = document.getElementById('sync-status');
+  status.textContent = 'Syncing…';
+  try {
+    const r = await invoke('sync_now');
+    status.textContent =
+      `${r.delivered} received, ${r.published} sent` +
+      (r.still_queued ? `, ${r.still_queued} still queued` : '') +
+      (r.rejected ? `, ${r.rejected} rejected by this client` : '') +
+      (r.errors.length ? ` — ${r.errors.join('; ')}` : '');
+  } catch (e) {
+    status.textContent = String(e);
+  }
+};
+</script>
+</body>
+</html>

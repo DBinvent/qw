@@ -1,6 +1,12 @@
 [workspace]
 resolver = "2"
-members = ["protocol", "node"]
+members = ["protocol", "node", "app/core"]
+
+# `app/src-tauri` is deliberately NOT a workspace member: it cannot build
+# without Tauri's system libraries (webkit2gtk-4.1 and friends), and a
+# member that breaks `cargo test --workspace` on a machine without them
+# would make the whole repo unbuildable for everyone else. It carries its
+# own lockfile and is built from its own directory.
 
 [workspace.package]
 edition = "2021"

@@ -455,6 +455,41 @@ shell itself is still entirely unbuilt.
       still has to pass `Event::verify` before being accepted. Actual
       Android intent / iOS universal link wiring is unbuilt (needs
       tooling this environment doesn't have).
+- [x] **Mailbox sync logic** (added 2026-08-25, the client half of §8's
+      store-and-forward cache): cursor tracking, publish-and-retry, and what
+      a client is willing to believe from a server.
+      (`node/src/sync.rs`, 10 tests. Transport-agnostic — the crate has no
+      HTTP client and no async runtime, so a `MailboxTransport` trait is
+      supplied by the app (`reqwest`) or a test (a `HashMap`), same split
+      `network::Network` already draws. Three properties the tests pin, each
+      mutation-checked by breaking the code and watching them fail:
+      **everything delivered is verified locally** and events addressed to
+      someone else are dropped — a hostile cache can withhold mail but not
+      inject any; **the cursor only advances on a successful fetch**, so a
+      failed poll re-asks the same window instead of stepping over it; and
+      **`since` is inclusive with dedupe by event id**, because
+      `since = cursor + 1` silently loses every event sharing that second.
+      Publishing is per-event across ranked servers: one acceptance is
+      delivery, a full mailbox falls through to the next server without
+      being counted an error, and anything nobody took stays queued.)
+- [x] **Client core + Tauri shell scaffold** (added 2026-08-25).
+      Split along what can be built anywhere: `app/core` (`qw-client-core`,
+      6 tests) holds the on-disk identity (`0600`, and a corrupt key file is
+      an error rather than a silently fresh identity), the HTTP
+      `MailboxTransport` mapping 201/200/507 onto Accepted/AlreadyHeld/
+      MailboxFull, and `follow_invite` accepting every form a person pastes
+      (full URL, bare npub, hex, with tracking params). Tested against a real
+      axum server on a real socket, including a full mailbox keeping the
+      event queued and an unreachable server being an error rather than a
+      silently empty inbox.
+      `app/src-tauri` is the window — three commands over that core — and is
+      **not** a workspace member: Tauri cannot compile without webkit2gtk,
+      so a member would break `cargo test --workspace` for anyone without
+      those packages. **Never compiled here**, and `app/README.md` says so;
+      `/tmp/install-tauri-deps.sh` installs what it needs.
+      Still open in §7: OS deep links (clicking a `/i/<npub>` link does not
+      open the app — it must be pasted), external-signer delegation, and any
+      UI beyond identity/follow/sync.
 - [ ] Web app path: compose/display only; signing delegated via QR or deep
       link to the external signer.
       The delegation protocol it would use is done (above); the actual web
