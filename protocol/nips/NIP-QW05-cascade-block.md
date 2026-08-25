@@ -56,6 +56,16 @@ which may itself already be a distance-N block record) — it's what a
 client's local policy checks against the distance-1 auto-cascade default
 before deciding to also block-and-republish.
 
+Hops are counted over the published introduction graph (NIP-QW07), since
+a node's own `Contact` list is private and cannot be walked by anyone
+else — **excluding introductions marked `via: "public-link"`**. Those are
+minted by a stranger following a publicly posted invite link, so nobody
+put their name behind them; counting them would mean that publishing an
+ad makes every reader who clicks it distance-1 from you, and two flags
+against any one of them would cascade onto you. Cascade block rests on a
+real signing account standing behind each edge, and a public link is
+precisely the edge where none does.
+
 ## Propagation walk
 
 1. Node sees a kind-9040 flag (or a kind-9041 record) against pubkey X,

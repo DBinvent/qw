@@ -381,6 +381,24 @@ again, no new mechanism needed.
       "Independent flaggers" is simplified to distinct signer pubkeys —
       true non-overlapping-path verification is out of scope, same
       deferral NIP-QW06 already made for multi-path reinforcement.)
+- [x] **Exclude public-link introductions from the cascade walk** (opened and
+      closed 2026-08-25, by §10 dropping invite-only). Without it an ad
+      campaign was a liability: `evaluate_flags` cascades to distance-1
+      neighbours over the introduction graph, so two flags against any
+      stranger who followed a published link would land on the publisher.
+      (`events::kinds::VIA_PUBLIC_LINK` + `Introduction::via`,
+      `Introduction::public_link()`, `is_public_link()`;
+      `cascade::introduction_adjacency` skips those edges, which drops them
+      from the BFS entirely — so a public-link edge is not a *bridge*
+      either, not just an excluded endpoint. Three tests:
+      a public-link neighbour is not cascaded while a vouched one still is,
+      a cascade does not travel *through* such an edge at distance 2, and
+      the field round-trips while an ordinary introduction still serializes
+      without it — `via` is `skip_serializing_if`, so existing events keep
+      their ids and older clients read absent-as-vouched. Both cascade tests
+      were mutation-checked: removing the skip fails them.)
+      Spec: NIP-QW07 "Public self-introduction", NIP-QW05's distance
+      paragraph.
 - [x] Cascade propagation: when a node's local policy accepts a block signal,
       it locally blocks and *re-publishes* the flag with its own vouch —
       implement as a signed "I also block X, sourced from Y" event, so
@@ -475,6 +493,49 @@ blocked on tooling not present here.)
 
 Build only after the peer-to-peer core works standalone — this is an
 efficiency/monetization layer, not a dependency.
+
+**Promoted to current priority alongside §7 (2026-08-25).** The precondition
+above is satisfied: §1–§6 are done and the core composes offline already
+(`contract.rs::offline_tolerance_every_step_composes_from_purely_local_data`
+builds a full contract with month-wide gaps and no network). What is missing
+is carriage — two mobile clients that are never awake at the same time have
+nothing between them. That is message caching, not coordination, and the
+distinction is what keeps this section honest:
+
+- **Optional stays literal.** Every existing item here already obeys it —
+  chain-calculation results are re-derivable by the client, vault only ever
+  returns events that verify on their own, and `node/src/server_registry.rs`
+  ranks *multiple* servers by ordinary trust score so none is hard-coded as
+  authoritative. A cache that a client cannot do without would break the
+  claim the landing page makes ("no central server"), so the client must
+  still work — degraded, not broken — against direct relays alone.
+- **Never the only copy.** Same rule as chain-calculation: a cached event is
+  a convenience copy of something the author can re-publish, never the sole
+  record. Losing the server loses latency, not history.
+
+- [x] **Store-and-forward message cache** (the priority item): hold signed
+      events addressed to a pubkey until that client next connects, then
+      deliver and expire. Distinct from the vault below, which is *backup of
+      your own records*; this is *delivery of someone else's message to you*.
+      Reuses what exists rather than inventing: acceptance is
+      `Event::verify()` (already the vault's only admission rule), addressing
+      is the existing `p` tag, and retrieval is
+      `qw_protocol::dual_index::all_records_about`. Open questions to settle
+      before coding: retention window, whether a cache may hold events it
+      cannot read (encrypted DMs — the NIP-QW06 requester's private ask to
+      hop 1 is exactly such a message), and per-pubkey quota so one account
+      cannot fill it.
+      (`qw-bo/server/src/mailbox.rs`, 10 tests. The three open questions are
+      settled in its module doc: **30-day retention**, matching §0.7's
+      dispute timeout so a step cannot expire while its contract is live;
+      **cursor, not acks** — `GET /mailbox?pubkey=&since=` returns and
+      deletes nothing, because delete-on-read loses a message whenever a
+      mobile fetch dies mid-flight and would need an auth scheme this server
+      is forbidden to require; **per-recipient quota of 500, full rejects**
+      rather than evicting, so a flooder cannot flush real mail out of
+      someone's mailbox. Content is never parsed — a test pushes an opaque
+      ciphertext through untouched. Admission is `Event::verify()` plus a `p`
+      tag, nothing else.)
 
 - [x] Chain-calculation service: traverses trust graph on request, returns a
       signed path + score, spot-checkable by the client against raw relay
@@ -581,6 +642,11 @@ clean.)
       explicitly in the new `README.md`.
 - [ ] Get a written tax attorney opinion before any investor data room or
       public launch beyond a closed test cohort.
+      **Re-read this after 2026-08-25:** invite-only was dropped (§10), so
+      "beyond a closed test cohort" no longer describes an optional later
+      stage — there is no closed cohort at any point, and §10 is a public
+      launch on day one. This item therefore gates §10 outright rather than
+      gating a step after it.
       **Not something this repository can complete** — a human/business
       action (retaining and paying an attorney), not engineering work.
       Left unchecked deliberately; `README.md` and
@@ -607,11 +673,33 @@ left ambiguously unchecked.)
 
 ## 10. Launch wedge
 
-- [ ] Pick **one** open-source ecosystem where contribution history already
-      exists in commit logs (per the docs' cold-start mitigation) — concrete
-      candidate criteria: active repo(s) with multiple maintainers, existing
-      informal reciprocity norms, willing pilot cohort of ~10–20 people who
-      already know each other's work.
+**No invite-only stage (decided 2026-08-25).** The launch is open: anyone
+who follows a published invite link is in. That removes the closed-cohort
+gate entirely — from this section, from §9's sequencing, and from the way
+the pilot is described anywhere else. What replaces it is distribution:
+
+- [ ] **Public invite links as the entry point** — NIP-QW07's third shape.
+      A participant publishes `https://knownby.work/i/<npub>` and puts it
+      wherever their professional history already lives: LinkedIn posts and
+      profiles first (that is where "who I worked with" is already the
+      subject), then conference talks, email signatures, README badges, job
+      ads. Following the link exchanges introductions and makes the follower
+      a hop-1 contact — someone four hops out, or not connected at all,
+      arrives as a direct contact instead of waiting for a chain of
+      introductions that a cold network cannot produce.
+      Needs: the `/i/<npub>` route on the landing site (deep-links to the
+      client, falls back to install instructions), `via: "public-link"` on
+      both generated 9060 events, and the cascade walk in
+      `protocol/src/cascade.rs::evaluate_flags` taught to skip those edges —
+      without that last part an ad campaign becomes a cascade-block
+      liability, see NIP-QW05.
+- [ ] Optionally seed density first with **one** open-source ecosystem where
+      contribution history already exists in commit logs (per the docs'
+      cold-start mitigation) — active repo(s) with multiple maintainers and
+      existing informal reciprocity norms. This is now one channel among
+      several rather than the gate: `bootstrap_from_git` turns its commit
+      history into candidate skill tags and introductions, so a repo's
+      contributors arrive with a graph instead of an empty profile.
       **Not something this repository can decide** — same category as §9's
       tax attorney opinion: it needs real knowledge of which communities
       have an actual willing cohort, which is the user's own call, not an
@@ -648,12 +736,29 @@ total across the workspace, `cargo clippy`/`cargo fmt --check` clean.)
 
 ## Suggested build order (summary)
 
-1. §1 scaffolding → §2 protocol layer (identity, event kinds, VC schema)
-2. §3 referral-query prototype — first demoable milestone
-3. §4 job lifecycle + §5 trust graph — makes the demo end-to-end
-4. §6 cascade block — hardens it against the known attack model
-5. §7 mobile client — makes it usable outside a dev machine
-6. §9 legal track — run in parallel starting now, gates external launch
-7. §10 pilot cohort launch
-8. §8 coordination server — only once organic usage justifies it
+1. §1 scaffolding → §2 protocol layer (identity, event kinds, VC schema) — **done**
+2. §3 referral-query prototype — first demoable milestone — **done**
+3. §4 job lifecycle + §5 trust graph — makes the demo end-to-end — **done**
+4. §6 cascade block — hardens it against the known attack model — **done**
+5. **§7 client + §8 coordination server — the current priority, together.**
+   Reordered 2026-08-25. The client is what makes any of this usable off a
+   dev machine, and a store-and-forward cache is what lets two clients that
+   are never online at the same moment exchange anything at all — §7's own
+   thin-client model ("syncs on relay wake") assumes something is holding
+   events until that wake. §8's original "only once organic usage justifies
+   it" was written about the *monetizable* services (rating bureau, broker
+   scores); it does not apply to plain message carriage, and its
+   preconditions are met either way — the peer-to-peer core §1–§6 works
+   standalone today.
+6. §10 pilot cohort launch
+7. §9 legal track — last
+
+**Sequencing caveat, recorded rather than smoothed over:** §9 describes
+itself as running in parallel from the start and *gating external launch*,
+and its own first item is "get a written tax attorney opinion before any
+investor data room or public launch beyond a closed test cohort". With
+invite-only dropped (§10, 2026-08-25) there is no closed cohort to shelter
+under, so §10 *is* the public launch: running it before §9 means launching
+ahead of that opinion, deliberately. That is a business risk call, not an
+engineering one — the order above records it rather than resolving it.
 

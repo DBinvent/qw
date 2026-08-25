@@ -3,6 +3,7 @@ pub mod contract;
 pub mod dual_index;
 pub mod events;
 pub mod identity;
+pub mod invite;
 pub mod legal;
 pub mod pilot;
 pub mod pub_window;

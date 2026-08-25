@@ -151,6 +151,17 @@ pub fn evaluate_flags(events: &[Event], policy: &CascadePolicy) -> Vec<BlockDeci
 /// Undirected adjacency from published `KIND_INTRODUCTION` events:
 /// introducer<->recipient, and introducer<->subject when introducing a
 /// third party (a mutual introduction).
+///
+/// Edges marked `via: "public-link"` are **skipped**. Cascade block rests
+/// on a real signing account standing behind each edge — that is what
+/// makes "block the accounts behind the farm and the farm falls with
+/// them" work. A public invite link (NIP-QW07) is exactly the edge where
+/// nobody stands behind anything: the publisher posted a URL and a
+/// stranger followed it. Counting those would mean publishing an ad makes
+/// every reader who clicks it distance-1 from the publisher, so two flags
+/// against any one of them would cascade onto the publisher — punishing
+/// distribution, which the network needs, on evidence about strangers,
+/// which it has none of.
 fn introduction_adjacency(events: &[Event]) -> HashMap<String, HashSet<String>> {
     let mut adjacency: HashMap<String, HashSet<String>> = HashMap::new();
     let mut connect = |a: String, b: String| {
@@ -168,6 +179,9 @@ fn introduction_adjacency(events: &[Event]) -> HashMap<String, HashSet<String>> 
         let Ok(intro) = serde_json::from_str::<Introduction>(&e.content) else {
             continue;
         };
+        if intro.is_public_link() {
+            continue;
+        }
         let introducer = e.pubkey.clone();
         connect(introducer.clone(), recipient.to_string());
         if intro.subject_pubkey != introducer {
@@ -234,9 +248,20 @@ mod tests {
                 subject_pubkey: introducer.nostr_pubkey_hex(),
                 chain: vec![],
                 note: None,
+                via: None,
             },
         )
         .sign(introducer)
+    }
+
+    /// The same edge, minted by following a published invite link.
+    fn public_link_intro(follower: &Identity, publisher: &Identity) -> Event {
+        introduction(
+            &follower.nostr_pubkey_hex(),
+            &publisher.nostr_pubkey_hex(),
+            &Introduction::public_link(follower.nostr_pubkey_hex()),
+        )
+        .sign(follower)
     }
 
     #[test]
@@ -296,6 +321,72 @@ mod tests {
                 flagged_signer: signer.nostr_pubkey_hex(),
                 distance: 1
             }
+        );
+    }
+
+    #[test]
+    fn cascade_skips_public_link_edges_but_not_vouched_ones() {
+        // A flagged publisher with two neighbours at distance 1: one who
+        // was actually introduced, one who merely followed the published
+        // invite link. Only the first is a vouch, so only the first
+        // cascades — otherwise posting a link on LinkedIn would make every
+        // reader who clicked it blockable on evidence about the publisher.
+        let publisher = Identity::generate();
+        let vouched = Identity::generate();
+        let stranger = Identity::generate();
+        let (flagger_a, flagger_b) = (Identity::generate(), Identity::generate());
+
+        let events = vec![
+            flag(&flagger_a, &publisher),
+            flag(&flagger_b, &publisher),
+            intro(&publisher, &vouched),
+            public_link_intro(&stranger, &publisher),
+        ];
+
+        let decisions = evaluate_flags(&events, &CascadePolicy::default());
+        assert!(
+            decisions
+                .iter()
+                .any(|d| d.pubkey == vouched.nostr_pubkey_hex()),
+            "an ordinary introduction neighbour must still cascade"
+        );
+        assert!(
+            !decisions
+                .iter()
+                .any(|d| d.pubkey == stranger.nostr_pubkey_hex()),
+            "a public-link neighbour must not be cascaded"
+        );
+    }
+
+    #[test]
+    fn public_link_edge_does_not_relay_a_cascade_onward() {
+        // The skip has to apply to the *path*, not just the last hop: a
+        // stranger who followed the link must not become a bridge that
+        // carries a block from the publisher to their own contacts.
+        let publisher = Identity::generate();
+        let stranger = Identity::generate();
+        let strangers_contact = Identity::generate();
+        let (flagger_a, flagger_b) = (Identity::generate(), Identity::generate());
+
+        let events = vec![
+            flag(&flagger_a, &publisher),
+            flag(&flagger_b, &publisher),
+            public_link_intro(&stranger, &publisher),
+            intro(&stranger, &strangers_contact),
+        ];
+
+        let decisions = evaluate_flags(
+            &events,
+            &CascadePolicy {
+                auto_cascade_distance: 2,
+                ..CascadePolicy::default()
+            },
+        );
+        assert!(
+            !decisions
+                .iter()
+                .any(|d| d.pubkey == strangers_contact.nostr_pubkey_hex()),
+            "a cascade must not travel through a public-link edge"
         );
     }
 

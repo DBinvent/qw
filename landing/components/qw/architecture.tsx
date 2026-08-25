@@ -1,4 +1,4 @@
-import { Clock, GitBranch, KeyRound, Network, ScrollText, ShieldCheck } from 'lucide-react'
+import { Clock, GitBranch, Inbox, KeyRound, Network, ScrollText, ShieldCheck } from 'lucide-react'
 import { ABSTRACT_URL } from '@/lib/links'
 
 const points = [
@@ -31,6 +31,12 @@ const points = [
     title: 'Sybil resistance via cascade block',
     desc: 'Trust flows down a signed chain; a block propagates up it. Behind any bot farm sits a limited number of real signing accounts — find and block those, and the farm falls with them.',
     tag: 'Social, not algorithmic',
+  },
+  {
+    icon: Inbox,
+    title: 'Neither side has to be online',
+    desc: 'No step of a contract needs the counterparty — or a network — reachable at the moment you take it; each one is composed and signed from what you already hold. Relays carry the signed records on to the other side whenever their client next wakes.',
+    tag: 'Store and forward',
   },
   {
     icon: KeyRound,

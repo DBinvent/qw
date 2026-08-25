@@ -50,19 +50,27 @@ than leaving to a future FAQ:
 1. **Generate an identity.** `qw_protocol::identity::Identity::generate()` —
    one secp256k1 keypair behind both a `did:key` controller id and a Nostr
    pubkey.
-2. **Get introduced.** [NIP-QW07](protocol/nips/NIP-QW07-introduction.md),
-   kind `9060`. Either a *self-introduction* to someone you found (via a
-   [NIP-QW06](protocol/nips/NIP-QW06-referral-query.md) referral query or a
-   public gateway), or a *mutual introduction* where an existing contact
-   introduces you to another of theirs and carries the connecting chain. It
-   is signed either way, so the introducer's own reputation is behind it —
-   there is no open registration, by design.
+2. **Get connected**, by any of the three shapes of
+   [NIP-QW07](protocol/nips/NIP-QW07-introduction.md) kind `9060`:
+   - **Follow someone's invite link** — `knownby.work/i/<npub>`, posted on
+     LinkedIn or anywhere else a professional history already lives. You and
+     the publisher exchange introductions and you are a hop-1 contact
+     immediately, whether you were four hops away in the graph or not in it
+     at all. No invitation to wait for, no cohort to be admitted to.
+   - **Self-introduction** to someone you found via a
+     [NIP-QW06](protocol/nips/NIP-QW06-referral-query.md) referral query.
+   - **Mutual introduction**, where an existing contact introduces you to
+     another of theirs and carries the connecting chain.
 3. **Publish what you can do.**
    [NIP-QW03](protocol/nips/NIP-QW03-profile-skill-tags.md) skill tags, with
    completed contracts as the evidence behind them.
 
 The contact graph is the membership list; there is nothing else to sign up
-to.
+to. Note what an edge does and does not mean: it makes you *reachable* —
+queries can route to you, offers can arrive. It says nothing about your
+competence, because trust in this system is computed only from completed,
+countersigned work. A stranger who arrives through a link and a stranger
+four hops away score the same until either of them finishes a contract.
 
 ## Legal notices
 

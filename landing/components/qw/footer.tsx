@@ -22,7 +22,7 @@ export function Footer() {
         <div className="flex flex-col items-center justify-between gap-4 sm:flex-row">
           <QwLogo />
           <p className="font-mono text-xs text-muted-foreground">
-            &copy; {new Date().getFullYear()} Vladimir Krinitsyn &middot; open source, MIT licensed
+            &copy; {new Date().getFullYear()}  Vladimir Krinitsyn &middot; open source, MIT licensed
           </p>
           <nav className="flex items-center gap-5 text-xs text-muted-foreground">
             <a href="#architecture" className="hover:text-foreground">

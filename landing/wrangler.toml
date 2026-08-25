@@ -3,13 +3,16 @@ main = "src/worker.ts"
 compatibility_date = "2024-09-23"
 
 # `next build` (output: 'export') writes the site to ./out and Workers Static
-# Assets serves it. The Worker itself runs for exactly one thing: forwarding
-# /api/news/* to the deployment's own API server, so the footer signup box has
-# somewhere to post. See src/worker.ts.
+# Assets serves it. The Worker runs for two paths only: forwarding /api/news/*
+# to the deployment's own API server so the footer signup box has somewhere to
+# post, and serving /i/<npub> invite links from the exported /invite/ page with
+# per-key OG tags. See src/worker.ts.
 [assets]
 directory = "./out"
 binding = "ASSETS"
-run_worker_first = ["/api/*"]
+# /i/* too: invite links are served by the Worker so their OG tags can be
+# rewritten per npub before a LinkedIn scraper reads them (src/worker.ts).
+run_worker_first = ["/api/*", "/i/*"]
 
 [vars]
 # API origin this Worker forwards /api/* to — the only backend the site has.

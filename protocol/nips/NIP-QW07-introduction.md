@@ -23,7 +23,9 @@ Tags: `["p", <recipient pubkey>]`.
 }
 ```
 
-Two shapes share this kind:
+Three shapes share this kind — the first two below, plus the public
+invite link further down, which is a self-introduction distributed as an
+ad rather than sent to one person:
 
 - **Self-introduction**: `subject_pubkey == event.pubkey` — the signer
   introducing themself to `recipient_pubkey` (someone they found, e.g.
@@ -47,6 +49,57 @@ format for that exchange — it's `KIND_PROFILE_SKILL_TAGS` (NIP-QW03) for
 the tags, and `crate::vc`'s SD-JWT selective disclosure (already built,
 §2) for the evidence, presented directly between the two parties rather
 than published. No new event kind needed.
+
+## Public self-introduction (invite link)
+
+The third shape, and the network's front door: a participant publishes
+their own self-introduction as a **link** and distributes it anywhere
+people already are — a LinkedIn post, a talk slide, an email signature, a
+job ad. Anyone who follows it exchanges introductions with the publisher
+and lands as a hop-1 contact, whether they were four hops away in the
+contact graph or not reachable from it at all.
+
+```
+https://knownby.work/i/<npub>[?r=<relay hint>]
+```
+
+The link carries only the publisher's pubkey and optional relay hints —
+it is public by definition, so it holds nothing that is not already
+publishable. Following it produces two ordinary kind-9060 events:
+
+1. The newcomer signs a **self-introduction** to the publisher
+   (`subject_pubkey == event.pubkey`, `chain: []`).
+2. The publisher's client answers with its own self-introduction, making
+   the edge mutual. That answer is automatic *because the publisher chose
+   to publish the link* — it is the standing consent the ad represents,
+   not a per-person decision.
+
+Both carry `"via": "public-link"` in their content, and this marker is
+load-bearing rather than informational:
+
+- **It is not a vouch.** A mutual introduction normally means one party
+  put their name behind another. Nobody who posts a link knows who will
+  click it, so an edge minted this way asserts reachability and nothing
+  else. Trust still comes only from completed, countersigned work
+  (NIP-QW01/QW02), which is why collapsing distance here does not
+  manufacture reputation: a stranger at hop 1 with no contracts scores
+  exactly what a stranger at hop 4 with no contracts scores — nothing.
+- **Cascade blocks must skip it.** NIP-QW05 measures cascade distance
+  over *this* graph, the published introduction graph, because a node's
+  `Contact` list is private. If public-link edges counted, publishing an
+  ad would make every stranger who clicked it distance-1 from you, and
+  two flags against any of them would cascade onto you — the opposite of
+  cascade block's premise, which is that a real signing account stands
+  behind each edge. A client evaluating a cascade therefore walks
+  introductions **excluding** `via: "public-link"` edges.
+- **Admission filters still apply.** §5's client-side pre-filters run on
+  inbound introductions, offers and queries regardless of how the edge
+  was created; an open front door is not an open inbox.
+
+Nothing about this shape is invite-only, rate-limited or gated by
+default. A publisher who wants those can rotate the link's pubkey or stop
+publishing it; the protocol does not model a revocable invite token,
+because a link that a stranger can use is exactly the point.
 
 ## Accepting an introduction
 
