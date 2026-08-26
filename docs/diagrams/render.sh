@@ -11,7 +11,10 @@
 # one, paste a file's contents into a new diagram at app.eraser.io instead,
 # which costs nothing and renders the same DSL.
 set -euo pipefail
-cd "$(dirname "$0")"
+# Stand in this script's own directory before anything relative is touched,
+# so it can be run by full path from anywhere. `readlink -f` so it holds
+# when the script is reached through a symlink as well.
+cd "$(dirname "$(readlink -f "$0")")"
 
 # Eraser needs to be told which renderer to use; it is not inferred from the
 # text. Keep this table in step with the files.

@@ -3,6 +3,7 @@ import {
   ArrowUpRight,
   CheckCircle2,
   CircleDashed,
+  Download,
   Hammer,
   KeyRound,
   Link2,
@@ -12,17 +13,27 @@ import {
 } from 'lucide-react'
 import { SiteHeader } from '@/components/qw/site-header'
 import { Footer } from '@/components/qw/footer'
-import { APP_README_URL, GITHUB_URL, REPO_README_URL, nipUrl } from '@/lib/links'
+import {
+  ANDROID_APK_SHA256,
+  ANDROID_APK_SIZE,
+  ANDROID_APK_URL,
+  ANDROID_APK_VERSION,
+  APP_README_URL,
+  GITHUB_URL,
+  REPO_README_URL,
+  nipUrl,
+} from '@/lib/links'
 
 // The detail behind the "How to join" card on the home page. The card states
 // the property (open, no gate); this page is the instruction — what a person
 // installs, what the app does on first launch, and which of it exists today.
 //
 // Rule for editing this page: every status claim below has to be true of the
-// repo at `main`, not of the plan. The app is unreleased, so the honest shape
-// is "here is the mechanism, here is how far the code got, here is how to
-// build it yourself" — a download button for a binary nobody can download
-// would be the one thing that makes the rest of the page untrustworthy.
+// repo at `main`, not of the plan. There is an Android APK now, so the button
+// is real — but the same rule is what makes the block around it say, in the
+// same breath, that the build has never been launched on a phone. A download
+// that oversells what it is would be the one thing that makes the rest of the
+// page untrustworthy; a download that states its own limits is not.
 
 export const metadata: Metadata = {
   title: 'How to join — QW',
@@ -76,10 +87,10 @@ const steps = [
 const platforms = [
   {
     name: 'Android',
-    state: 'buildable, unreleased',
+    state: 'signed apk, untested',
     tone: 'progress' as const,
     detail:
-      'Tauri v2 mobile target. Builds from source once the Android SDK, NDK and a JDK are installed; no APK is published yet and it has never been run on a device.',
+      'Tauri v2 mobile target. A signed arm64 APK is downloadable at the top of this page; it is a sideload build, not a Play listing, and it has never been launched on a device. Building it yourself needs the Android SDK, NDK and a JDK.',
   },
   {
     name: 'iOS',
@@ -127,7 +138,7 @@ const built = [
     done: false,
     what: 'A released app',
     detail:
-      'The shell exists and compiles; no build is signed, packaged or published for any platform yet.',
+      'Android has a signed APK you can sideload from this page — one architecture, never run on hardware, on no store. Nothing is packaged for iOS or desktop, and no platform has been through a release build that someone then used.',
   },
   {
     done: false,
@@ -164,16 +175,53 @@ export default function JoinPage() {
             </p>
 
             {/* Stated before the instructions, not after them: someone who
-                follows four steps and then discovers there is nothing to
-                install has been wasted, and the page has lied by omission. */}
-            <div className="mt-8 rounded-xl border border-dashed border-primary/40 bg-card p-5">
-              <p className="font-mono text-xs uppercase tracking-widest text-primary">Status — no download yet</p>
+                follows four steps and then discovers what they installed has
+                never been run has been wasted, and the page has lied by
+                omission. The caveats sit next to the button, not below it. */}
+            <div className="mt-8 rounded-xl border border-primary/40 bg-card p-5">
+              <p className="font-mono text-xs uppercase tracking-widest text-primary">
+                Android — v{ANDROID_APK_VERSION}, signed, unproven
+              </p>
               <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
-                QW is an early prototype. The protocol and the client core are built and tested, the app
-                shell compiles, and no packaged build has been published for any platform — so today you
-                can read the mechanism, build the client from source, or leave your address in the footer
-                and be told when there is something to install. Nothing on this page is a waiting list:
-                when the app ships, joining needs no permission from us.
+                There is an APK. It is signed, it installs by sideload rather than from Play, and it has{' '}
+                <strong className="font-medium text-foreground">never been launched on a phone</strong> —
+                the protocol and client core are tested, the shell compiles, and nobody has yet watched
+                this build start on real hardware. Treat it as the first thing to try, not as a release.
+                iOS and desktop have no package at all.
+              </p>
+              <div className="mt-5 flex flex-wrap items-center gap-x-4 gap-y-3">
+                {/* Cross-origin, so the `download` attribute would be
+                    ignored — the file arrives as a download because nginx
+                    says so, not because the anchor asks. */}
+                <a
+                  href={ANDROID_APK_URL}
+                  className="glow-violet inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-primary px-5 text-sm font-medium text-primary-foreground transition-transform hover:-translate-y-px"
+                >
+                  <Download className="size-4" />
+                  Download the APK
+                </a>
+                <span className="font-mono text-xs text-muted-foreground">
+                  {ANDROID_APK_SIZE} · arm64-v8a · Android 7.0+
+                </span>
+              </div>
+              <p className="mt-4 text-sm leading-relaxed text-muted-foreground">
+                Android will ask you to allow installs from whatever app opened it; that prompt is what
+                sideloading is. Check what you got before you tap it —{' '}
+                <code className="font-mono text-xs text-foreground">sha256sum</code> on the file must
+                print:
+              </p>
+              <p className="mt-2 break-all font-mono text-[11px] leading-relaxed text-muted-foreground">
+                {ANDROID_APK_SHA256}
+              </p>
+              <p className="mt-4 text-sm leading-relaxed text-muted-foreground">
+                The file comes from <span className="font-mono text-xs">apt.dbinvent.com/paks</span>,
+                the release area on the machine that builds it — same hands, a different domain, which
+                is worth saying out loud on a page about not trusting things by default.
+              </p>
+              <p className="mt-4 text-sm leading-relaxed text-muted-foreground">
+                You can also build it from source below, or leave your address in the footer and be told
+                when there is something better than this. Nothing on this page is a waiting list: joining
+                needs no permission from us.
               </p>
             </div>
           </div>

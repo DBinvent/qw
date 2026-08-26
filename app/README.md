@@ -35,9 +35,13 @@ System libraries need root, so this is a script rather than a command to
 paste:
 
 ```sh
-sudo bash /tmp/install-tauri-deps.sh      # written by the same session; see its header
-cargo install tauri-cli --version '^2.0' --locked
+sudo bash app/install.sh --desktop        # full path works from anywhere
 ```
+
+That installs the GTK/WebKit development packages and `tauri-cli` — apt as
+root, `cargo install` as you, because a root-owned `~/.cargo` makes every
+later build a sudo operation. `sudo bash app/install.sh` with no argument does
+the Android half below in the same run.
 
 Then, from `app/src-tauri`:
 
@@ -66,11 +70,29 @@ Android Studio Java installation not found ... and JAVA_HOME environment
 variable not set
 ```
 
-A JDK, the Android SDK, the NDK and four rustup targets fix that;
-`/tmp/install-android-deps.sh` (written by the same session, read its header)
-installs them — JDK as root, SDK as your own user, because `cargo tauri
-android build` writes into the SDK and a root-owned one makes every build a
-sudo operation. Then:
+A JDK, the Android SDK, the NDK and four rustup targets fix that:
+
+```sh
+sudo bash app/install.sh --android
+```
+
+Same script, same root/user split — the SDK must not be root-owned, because
+sdkmanager writes into it on every later `cargo tauri android build`.
+
+**Which JDK**: 21 (`openjdk-21-jdk-headless`), or 17. Not 25. `cargo tauri
+android init` generates a project pinned to Gradle 8.14.3, which runs on Java
+17-24 — Java 25 needs Gradle 9.1 or newer — and the Kotlin plugin it pins is
+1.9.25, older still. Headless is the right variant: gradle, kotlinc, d8 and
+apksigner open no window; only Android Studio and the emulator GUI would need
+the full package.
+
+The versions that matter are pinned in the script's header block and come from
+the tauri-cli 2.11.4 templates, not from taste: platform and build-tools **36**
+(the template's `compileSdk`/`targetSdk`), NDK **r27 LTS**, cmdline-tools 23.
+`NDK_HOME` has to be exported separately — cargo-mobile2 reads it directly and
+stops with "Have you installed the NDK?" even when `ANDROID_HOME` is right.
+
+Then:
 
 ```sh
 cargo tauri android init     # writes gen/android/

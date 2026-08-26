@@ -486,7 +486,7 @@ shell itself is still entirely unbuilt.
       **not** a workspace member: Tauri cannot compile without webkit2gtk,
       so a member would break `cargo test --workspace` for anyone without
       those packages. **Never compiled here**, and `app/README.md` says so;
-      `/tmp/install-tauri-deps.sh` installs what it needs.
+      `app/install.sh --desktop` installs what it needs.
       *(Updated 2026-08-25: with webkit2gtk + tauri-cli installed it does
       compile — `cargo build`/`clippy` clean. Still not run: needs a
       display.)*
