@@ -45,11 +45,16 @@ what they confirm.
 
 Not reachable yet — no relay, no gateway — but the mechanism is specified
 and implemented at the protocol layer, so it is worth stating plainly rather
-than leaving to a future FAQ:
+than leaving to a future FAQ. The same thing written for a visitor rather
+than a developer, including what is and is not released, is at
+<https://knownby.work/join> (`landing/app/join/page.tsx`).
 
-1. **Generate an identity.** `qw_protocol::identity::Identity::generate()` —
-   one secp256k1 keypair behind both a `did:key` controller id and a Nostr
-   pubkey.
+1. **Generate an identity.** In the app — the client is a phone app first
+   (`app/`, Tauri v2), and first launch makes the key on the device. Under
+   it that is `qw_protocol::identity::Identity::generate()` — one secp256k1
+   keypair behind both a `did:key` controller id and a Nostr pubkey. There
+   is no account to create and no server that could issue one; losing the
+   key is losing every record signed with it.
 2. **Get connected**, by any of the three shapes of
    [NIP-QW07](protocol/nips/NIP-QW07-introduction.md) kind `9060`:
    - **Follow someone's invite link** — `knownby.work/i/<npub>`, posted on

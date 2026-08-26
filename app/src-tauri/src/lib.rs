@@ -7,10 +7,11 @@
 //! directory over in `app/core`, which builds and tests anywhere, and is
 //! where every rule worth arguing about is pinned by a test.
 //!
-//! **Unverified in this repo.** This file has never been compiled here:
-//! `cargo tauri` and the GTK/WebKit development packages are absent (see
-//! `app/README.md` for the one-line install). Treat it as a scaffold to
-//! compile and correct on a machine that has them, not as working code.
+//! **Compiles, never run.** `cargo build` and `cargo clippy` are clean here
+//! since webkit2gtk and `tauri-cli` were installed (2026-08-25), but running
+//! it needs a display and nothing in this file has a test. On Android it is
+//! `run()` that the generated activity calls, via the `mobile_entry_point`
+//! attribute at the bottom — see `app/README.md` for that toolchain.
 
 use std::sync::Mutex;
 

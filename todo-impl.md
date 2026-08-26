@@ -487,9 +487,31 @@ shell itself is still entirely unbuilt.
       so a member would break `cargo test --workspace` for anyone without
       those packages. **Never compiled here**, and `app/README.md` says so;
       `/tmp/install-tauri-deps.sh` installs what it needs.
+      *(Updated 2026-08-25: with webkit2gtk + tauri-cli installed it does
+      compile — `cargo build`/`clippy` clean. Still not run: needs a
+      display.)*
       Still open in §7: OS deep links (clicking a `/i/<npub>` link does not
       open the app — it must be pasted), external-signer delegation, and any
       UI beyond identity/follow/sync.
+- [ ] **Android build** — the toolchain, not the code. `[lib]` already emits
+      `cdylib`/`staticlib` and `run()` carries `mobile_entry_point`, so the
+      Rust side needs nothing; `cargo tauri android init` stops on a missing
+      JDK (verified 2026-08-26, that exact error). `/tmp/install-android-
+      deps.sh` installs JDK + SDK + NDK + the four rustup targets — JDK as
+      root, SDK as the invoking user, since `android build` writes into the
+      SDK. Open when someone runs it: whether `gen/android/` is committed or
+      regenerated, and app signing (nothing is signed or published today).
+      `app/ui/index.html` was made phone-shaped in advance (device-width
+      viewport, safe-area insets, 44px targets, 16px inputs, clipboard
+      fallback for a non-secure WebView) — unverified on a device.
+- [x] **Public joining instructions** (added 2026-08-26): `knownby.work/join`
+      (`landing/app/join/page.tsx`), linked from the "How to join" card on
+      the home page, the nav, the footer and `/i/<npub>`. Four steps —
+      install the app, first launch generates the key, open or post an
+      invite link, publish skill tags — plus a per-platform status table and
+      "what exists today". Written so the "no download yet" line comes
+      *before* the steps: a reader who follows four steps and then finds
+      there is nothing to install has been misled by omission.
 - [ ] Web app path: compose/display only; signing delegated via QR or deep
       link to the external signer.
       The delegation protocol it would use is done (above); the actual web

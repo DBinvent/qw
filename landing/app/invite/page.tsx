@@ -113,23 +113,24 @@ export default function InvitePage() {
                 There is no released client yet — QW is an early prototype, and the app that would
                 take this key, generate your identity and publish the two introductions is still
                 being built. Nothing was sent by opening this page. Keep the link: it stays valid,
-                because it is just a public key.
+                because it is just a public key. The joining guide says what the app will do with it
+                and how far the code has got.
               </p>
               <div className="mt-5 flex flex-wrap gap-3">
+                <a
+                  href="/join"
+                  className="glow-violet inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-primary px-5 text-sm font-medium text-primary-foreground transition-transform hover:-translate-y-px"
+                >
+                  How to join
+                  <ArrowUpRight className="size-4" />
+                </a>
                 <a
                   href={GITHUB_URL}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="glow-violet inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-primary px-5 text-sm font-medium text-primary-foreground transition-transform hover:-translate-y-px"
-                >
-                  Read the protocol
-                  <ArrowUpRight className="size-4" />
-                </a>
-                <a
-                  href="/#architecture"
                   className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-border px-5 text-sm font-medium text-foreground transition-colors hover:bg-secondary/60"
                 >
-                  How QW works
+                  Read the protocol
                 </a>
               </div>
             </div>

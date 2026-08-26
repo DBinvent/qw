@@ -13,3 +13,11 @@ export const FAQ_DOC_URL = `${DOCS_BASE}/qw-design-faq.md`
 
 export const SOURCE_URL = GITHUB_URL
 export const SOURCE_LABEL = 'View source'
+
+// Files inside the public repo, linked from the join guide. `main` is the
+// default branch and the one Workers Builds deploys this site from, so a
+// blob link here and the deployed page always describe the same tree.
+const REPO_BLOB = `${GITHUB_URL}/blob/main`
+export const REPO_README_URL = `${REPO_BLOB}/README.md`
+export const APP_README_URL = `${REPO_BLOB}/app/README.md`
+export const nipUrl = (file: string) => `${REPO_BLOB}/protocol/nips/${file}`

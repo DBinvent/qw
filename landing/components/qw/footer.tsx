@@ -24,12 +24,17 @@ export function Footer() {
           <p className="font-mono text-xs text-muted-foreground">
             &copy; {new Date().getFullYear()}  Vladimir Krinitsyn &middot; open source, MIT licensed
           </p>
-          <nav className="flex items-center gap-5 text-xs text-muted-foreground">
-            <a href="#architecture" className="hover:text-foreground">
+          {/* Root-relative, not bare fragments: this footer also renders on
+              /join and /i/<npub>, where "#architecture" would scroll nowhere. */}
+          <nav className="flex flex-wrap items-center justify-center gap-5 text-xs text-muted-foreground">
+            <a href="/#architecture" className="hover:text-foreground">
               Architecture
             </a>
-            <a href="#faq" className="hover:text-foreground">
+            <a href="/#faq" className="hover:text-foreground">
               FAQ
+            </a>
+            <a href="/join" className="hover:text-foreground">
+              How to join
             </a>
             <a href={SOURCE_URL} target="_blank" rel="noopener noreferrer" className="hover:text-foreground">
               {SOURCE_LABEL}

@@ -1,7 +1,28 @@
-import { Clock, GitBranch, Inbox, KeyRound, Network, ScrollText, ShieldCheck } from 'lucide-react'
+import {
+  ArrowRight,
+  Clock,
+  GitBranch,
+  Inbox,
+  KeyRound,
+  type LucideIcon,
+  Network,
+  ScrollText,
+  ShieldCheck,
+  UserPlus,
+} from 'lucide-react'
 import { ABSTRACT_URL } from '@/lib/links'
 
-const points = [
+type Point = {
+  icon: LucideIcon
+  title: string
+  desc: string
+  tag: string
+  /** Set on the one card that leads somewhere; see the note on "How to join". */
+  href?: string
+  cta?: string
+}
+
+const points: Point[] = [
   {
     icon: Clock,
     title: 'Quant: a unit, not a currency',
@@ -44,6 +65,18 @@ const points = [
     desc: 'Identity is a keypair, not an account with a provider. Storage and transport run over Nostr relays; a client is a thin signing device — the same model Signal uses for messages.',
     tag: 'No central server',
   },
+  {
+    icon: UserPlus,
+    title: 'How to join',
+    desc: 'No gate and no waiting list — install the app, let it generate a keypair, and you are in. Your invite link works anywhere you can post a URL, and someone who follows it arrives as a first-degree contact instead of a stranger several hops away.',
+    tag: 'Open, not invite-only',
+    // The only card with a href: the others state a property, this one is an
+    // instruction, and "you are in" invites the obvious follow-up question of
+    // what exactly you install. /join answers it, including what does not
+    // exist yet.
+    href: '/join',
+    cta: 'Read the joining guide',
+  },
 ]
 
 export function Architecture() {
@@ -64,18 +97,35 @@ export function Architecture() {
         </div>
 
         <div className="mt-12 grid gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-2 lg:grid-cols-3">
-          {points.map((p) => (
-            <div key={p.title} className="group relative bg-card p-6 transition-colors hover:bg-secondary/60">
-              <div className="flex items-center justify-between">
-                <span className="flex size-10 items-center justify-center rounded-lg border border-border bg-secondary text-primary transition-colors group-hover:border-primary/40">
-                  <p.icon className="size-5" />
-                </span>
-                <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">{p.tag}</span>
-              </div>
-              <h3 className="mt-5 text-base font-semibold text-foreground">{p.title}</h3>
-              <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{p.desc}</p>
-            </div>
-          ))}
+          {points.map((p) => {
+            // A card with a href is a link end to end rather than a div with a
+            // link inside it: the whole tile is already a hover target, and a
+            // 6rem-wide "read more" would be the only thing on this grid you
+            // have to aim at.
+            const Card = p.href ? 'a' : 'div'
+            return (
+              <Card
+                key={p.title}
+                {...(p.href ? { href: p.href } : {})}
+                className="group relative block bg-card p-6 transition-colors hover:bg-secondary/60"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="flex size-10 items-center justify-center rounded-lg border border-border bg-secondary text-primary transition-colors group-hover:border-primary/40">
+                    <p.icon className="size-5" />
+                  </span>
+                  <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">{p.tag}</span>
+                </div>
+                <h3 className="mt-5 text-base font-semibold text-foreground">{p.title}</h3>
+                <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{p.desc}</p>
+                {p.cta ? (
+                  <span className="mt-4 inline-flex items-center gap-1.5 text-sm font-medium text-primary">
+                    {p.cta}
+                    <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
+                  </span>
+                ) : null}
+              </Card>
+            )
+          })}
         </div>
 
         <p className="mt-8 text-sm leading-relaxed text-muted-foreground">

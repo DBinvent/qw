@@ -9,6 +9,7 @@ import { SOURCE_LABEL, SOURCE_URL } from '@/lib/links'
 const navLinks = [
   { label: 'Architecture', href: '/#architecture' },
   { label: 'FAQ', href: '/#faq' },
+  { label: 'How to join', href: '/join' },
 ]
 
 export function SiteHeader() {
@@ -50,7 +51,9 @@ export function SiteHeader() {
         </div>
       </div>
 
-      <div className={cn('overflow-hidden border-t border-border/60 md:hidden', open ? 'max-h-40' : 'max-h-0')}>
+      {/* max-h grows with navLinks: three links plus the CTA button no longer
+          fit in the 10rem this used to be, and the overflow is hidden. */}
+      <div className={cn('overflow-hidden border-t border-border/60 md:hidden', open ? 'max-h-64' : 'max-h-0')}>
         <nav className="flex flex-col gap-1 px-4 py-3" aria-label="Mobile">
           {navLinks.map((link) => (
             <a

@@ -49,6 +49,52 @@ cargo tauri build        # bundle it
 `ui/` is a single dependency-free HTML file — no npm, no bundler, no build
 step before `cargo tauri`.
 
+## Building for Android
+
+QW is meant to be a phone app: the device holds the key and signs, and syncs
+whenever it next wakes. Tauri v2 builds that from this same crate — `[lib]`
+already emits `cdylib`/`staticlib` and `run()` carries
+`#[cfg_attr(mobile, tauri::mobile_entry_point)]`, which is all the mobile
+target needs from the Rust side.
+
+What is missing is the toolchain. On this host, `cargo tauri android init`
+stops at:
+
+```
+Error failed to ensure Android environment: Java not found in PATH, default
+Android Studio Java installation not found ... and JAVA_HOME environment
+variable not set
+```
+
+A JDK, the Android SDK, the NDK and four rustup targets fix that;
+`/tmp/install-android-deps.sh` (written by the same session, read its header)
+installs them — JDK as root, SDK as your own user, because `cargo tauri
+android build` writes into the SDK and a root-owned one makes every build a
+sudo operation. Then:
+
+```sh
+cargo tauri android init     # writes gen/android/
+cargo tauri android dev      # device or emulator on adb
+cargo tauri android build    # unsigned APK/AAB
+```
+
+`gen/android/` is generated, not authored — the repo currently carries only
+`gen/schemas/`, and whether the Android project is committed or regenerated
+is a decision for whoever runs `init` first.
+
+`ui/index.html` is written for a phone screen already: a `width=device-width`
+viewport (without it the Android WebView lays out at 980px and scales down),
+`viewport-fit=cover` plus safe-area padding, 44px tap targets, a 16px input
+font so iOS does not zoom on focus, and an npub that wraps instead of setting
+the whole app scrolling sideways. Copying falls back to `execCommand` when
+`navigator.clipboard` is unavailable, which is the case in a WebView that is
+not a secure context. **None of it has been seen on a device** — it is the
+set of things that are wrong by default, fixed in advance, not a tested
+layout.
+
+iOS is the same codebase and needs macOS with Xcode, which this project has
+not had access to.
+
 ## What the shell does today
 
 - Shows your invite link (`knownby.work/i/<npub>`) and copies it.

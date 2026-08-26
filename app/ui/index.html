@@ -2,35 +2,57 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<!-- Phone first: without this the Android WebView lays the page out at
+     980 CSS pixels and then scales it down, which is the classic "the app
+     looks like a shrunken web page" bug. viewport-fit=cover pairs with the
+     safe-area insets below, so content clears the notch and the gesture bar
+     instead of being padded away from them by a fixed guess. -->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>QW</title>
 <style>
   :root { color-scheme: dark; }
-  body { margin: 0; padding: 2rem; background: #09090b; color: #e4e4e7;
-         font: 14px/1.6 ui-sans-serif, system-ui, sans-serif; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; background: #09090b; color: #e4e4e7;
+         font: 15px/1.6 ui-sans-serif, system-ui, sans-serif;
+         padding: calc(1.25rem + env(safe-area-inset-top)) calc(1.25rem + env(safe-area-inset-right))
+                  calc(1.25rem + env(safe-area-inset-bottom)) calc(1.25rem + env(safe-area-inset-left)); }
+  main { max-width: 34rem; margin: 0 auto; }
   h1 { font-size: 1.1rem; letter-spacing: .12em; text-transform: uppercase;
-       color: #a78bfa; margin: 0 0 1.5rem; }
+       color: #a78bfa; margin: 0 0 1.25rem; }
   section { border: 1px solid #27272a; border-radius: .6rem; padding: 1rem 1.25rem;
             margin-bottom: 1rem; background: #111114; }
-  code, input { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; }
-  input { width: 100%; padding: .6rem; background: #09090b; color: inherit;
-          border: 1px solid #27272a; border-radius: .4rem; }
-  button { margin-top: .75rem; padding: .55rem 1.1rem; border: 0; border-radius: .4rem;
-           background: #7c3aed; color: white; font: inherit; cursor: pointer; }
+  code { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px;
+         /* An npub has no spaces, so it would otherwise push the card wider
+            than the screen and set the whole app scrolling sideways. */
+         overflow-wrap: anywhere; user-select: all; -webkit-user-select: all; }
+  input { font-family: ui-monospace, SFMono-Regular, monospace;
+          /* 16px exactly: anything smaller makes iOS Safari zoom in on focus
+             and never zoom back out. */
+          font-size: 16px;
+          width: 100%; box-sizing: border-box; padding: .7rem; background: #09090b;
+          color: inherit; border: 1px solid #27272a; border-radius: .4rem; }
+  button { margin-top: .75rem; min-height: 44px; padding: .6rem 1.2rem; border: 0;
+           border-radius: .4rem; background: #7c3aed; color: white; font: inherit;
+           font-size: 15px; cursor: pointer; touch-action: manipulation; }
+  button:active { background: #6d28d9; }
   .muted { color: #a1a1aa; }
 </style>
 </head>
 <body>
+  <main>
   <h1>QW</h1>
 
   <section>
     <div class="muted">Your invite link — post it anywhere your work history already lives.</div>
     <p><code id="link">…</code></p>
     <button id="copy">Copy</button>
+    <p class="muted" id="copy-status"></p>
   </section>
 
   <section>
     <div class="muted">Follow someone's link</div>
-    <p><input id="follow-input" placeholder="https://knownby.work/i/npub1…" spellcheck="false"></p>
+    <p><input id="follow-input" placeholder="https://knownby.work/i/npub1…" spellcheck="false"
+              autocapitalize="none" autocorrect="off" inputmode="url"></p>
     <button id="follow">Follow</button>
     <p class="muted" id="follow-status"></p>
   </section>
@@ -40,6 +62,7 @@
     <button id="sync">Sync now</button>
     <p class="muted" id="sync-status">Not synced yet.</p>
   </section>
+  </main>
 
 <script type="module">
 // Tauri v2 exposes invoke on window.__TAURI__ when withGlobalTauri is on;
@@ -49,7 +72,40 @@ const invoke = window.__TAURI__.core.invoke;
 
 const me = await invoke('identity');
 document.getElementById('link').textContent = me.invite_link;
-document.getElementById('copy').onclick = () => navigator.clipboard.writeText(me.invite_link);
+
+// navigator.clipboard needs a secure context, which the Android WebView's
+// custom asset protocol is not guaranteed to be. Fall back to the old
+// execCommand path, and if even that is refused say so rather than
+// silently doing nothing — the link is selectable text either way
+// (`user-select: all` above), so a copy is always possible by hand.
+async function copyText(text) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch { /* fall through */ }
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.setAttribute('readonly', '');
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  let ok = false;
+  try {
+    ok = document.execCommand('copy');
+  } catch { /* ok stays false */ }
+  document.body.removeChild(ta);
+  return ok;
+}
+
+document.getElementById('copy').onclick = async () => {
+  const status = document.getElementById('copy-status');
+  status.textContent = (await copyText(me.invite_link))
+    ? 'Copied.'
+    : 'Could not copy — select the link above and copy it by hand.';
+};
 
 document.getElementById('follow').onclick = async () => {
   const status = document.getElementById('follow-status');
