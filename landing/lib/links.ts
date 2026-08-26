@@ -22,11 +22,11 @@ export const REPO_README_URL = `${REPO_BLOB}/README.md`
 export const APP_README_URL = `${REPO_BLOB}/app/README.md`
 export const nipUrl = (file: string) => `${REPO_BLOB}/protocol/nips/${file}`
 
-// The Android build. Binaries are not in this repo: apt.dbinvent.com/paks/ is
-// the release area on the machine that builds them (/media/lab/repo/paks/,
-// nginx behind Cloudflare), the same place the Atria eval kit ships from. An
-// APK is a build output, not source — in git it bloats every clone forever
-// and still only reaches a visitor when the site redeploys.
+// The Android build. Binaries are not in this repo: apt.dbinvent.com/paks/
+// is the release area on the build host (nginx behind Cloudflare), the same
+// place the Atria eval kit ships from. An APK is a build output, not source
+// — in git it bloats every clone forever and still only reaches a visitor
+// when the site redeploys.
 //
 // The host is deliberately one constant. Serving downloads from dbinvent.com
 // while the site is knownby.work mixes two identities; the fix, when that is
