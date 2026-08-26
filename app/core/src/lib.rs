@@ -17,10 +17,14 @@
 //!   against a coordination server's `/mailbox`.
 //! - [`follow_invite`] — the client half of NIP-QW07's public link.
 
+use std::collections::HashSet;
 use std::fs;
 use std::io;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
+use qrcode::render::svg;
+use qrcode::QrCode;
 use qw_node::sync::{MailboxTransport, PublishOutcome};
 use qw_protocol::events::Event;
 use qw_protocol::identity::Identity;
@@ -37,6 +41,11 @@ pub enum ClientError {
     /// how to interpret. Kept distinct from `Http` so a caller can tell a
     /// protocol mismatch from a dead network.
     UnexpectedStatus(u16),
+    /// The invite link would not fit in a QR code. Unreachable for a real
+    /// link — a `knownby.work/i/npub1…` URL is ~85 bytes against a ceiling
+    /// in the thousands — but the encoder can say no and swallowing that
+    /// would mean rendering a blank square.
+    QrTooLong(usize),
 }
 
 impl std::fmt::Display for ClientError {
@@ -49,6 +58,9 @@ impl std::fmt::Display for ClientError {
             ClientError::Invite(e) => write!(f, "{e}"),
             ClientError::Http(e) => write!(f, "{e}"),
             ClientError::UnexpectedStatus(s) => write!(f, "server answered {s}"),
+            ClientError::QrTooLong(n) => {
+                write!(f, "{n} bytes is too long to encode as a QR code")
+            }
         }
     }
 }
@@ -116,6 +128,147 @@ impl Vault {
     }
 }
 
+/// Everything this client has been handed, kept on disk.
+///
+/// Without it the client is amnesiac in a way that quietly disables most of
+/// the protocol: `MailboxSync::poll` hands back `delivered` events and the
+/// shell counted them and dropped them, so nothing could compute a trust
+/// path, list a contract, or derive an earned skill tag — every one of those
+/// is a function over held history, and the history was being thrown away
+/// once per sync.
+///
+/// **Append-only, and verified on the way in and on the way out.** A signed
+/// event is evidence; a file on a phone is not. Anything that fails
+/// `Event::verify` is refused on append and skipped on load, because the
+/// alternative is a tampered line silently becoming an input to a trust
+/// computation — the one place in this codebase where being wrong is worse
+/// than being empty. Skipped lines are counted rather than swallowed
+/// ([`EventStore::rejected`]), so a corrupt store is visible instead of
+/// merely smaller.
+///
+/// JSON Lines: one event per line, appended, never rewritten. A partially
+/// written trailing line after a crash costs one event and fails its own
+/// verify on the next load, rather than making the file unparseable.
+///
+/// `0600`, like the key. These are public signed records, but the *set* of
+/// them is a contract history — who someone works with and how often — and
+/// that is nobody else's business on a shared machine.
+///
+/// Unbounded, deliberately for now: nothing prunes, because deciding what
+/// may be forgotten is a protocol question (records are evidence others may
+/// ask for) and not one to answer accidentally inside a cache.
+pub struct EventStore {
+    path: PathBuf,
+    events: Vec<Event>,
+    ids: HashSet<String>,
+    rejected: usize,
+}
+
+impl EventStore {
+    /// Open the store in `dir`, loading and verifying what is already
+    /// there. A missing file is an empty store, not an error — first run.
+    pub fn open(dir: impl Into<PathBuf>) -> Result<Self, ClientError> {
+        let path = dir.into().join("events.jsonl");
+        let mut store = Self {
+            path,
+            events: Vec::new(),
+            ids: HashSet::new(),
+            rejected: 0,
+        };
+        if !store.path.exists() {
+            return Ok(store);
+        }
+        let raw = fs::read_to_string(&store.path)?;
+        for line in raw.lines().filter(|l| !l.trim().is_empty()) {
+            match serde_json::from_str::<Event>(line) {
+                Ok(event) if event.verify().is_ok() => {
+                    if store.ids.insert(event.id.clone()) {
+                        store.events.push(event);
+                    }
+                }
+                _ => store.rejected += 1,
+            }
+        }
+        store.events.sort_by_key(|e| e.created_at);
+        Ok(store)
+    }
+
+    /// Everything held, oldest first — the input to trust paths, earned
+    /// skill tags and any history view.
+    pub fn events(&self) -> &[Event] {
+        &self.events
+    }
+
+    pub fn len(&self) -> usize {
+        self.events.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.events.is_empty()
+    }
+
+    /// Lines on disk that did not parse or did not verify. Non-zero means
+    /// the file was truncated or edited; the store still works, with that
+    /// many records missing.
+    pub fn rejected(&self) -> usize {
+        self.rejected
+    }
+
+    /// Add what a sync delivered. Returns how many were new.
+    ///
+    /// Unverifiable events are refused rather than stored: a mailbox is
+    /// untrusted infrastructure (§8 — "a hostile cache can withhold mail but
+    /// cannot inject any"), and that guarantee is only true if the thing
+    /// writing to disk enforces it.
+    ///
+    /// Written before the in-memory state is updated, so a failed write
+    /// leaves the two agreeing rather than leaving the process convinced it
+    /// holds something no restart will find.
+    pub fn append(
+        &mut self,
+        events: impl IntoIterator<Item = Event>,
+    ) -> Result<usize, ClientError> {
+        let fresh: Vec<Event> = events
+            .into_iter()
+            .filter(|e| e.verify().is_ok() && !self.ids.contains(&e.id))
+            .fold(Vec::new(), |mut acc, e| {
+                // Dedupe within the batch too, not just against the file.
+                if !acc.iter().any(|k: &Event| k.id == e.id) {
+                    acc.push(e);
+                }
+                acc
+            });
+        if fresh.is_empty() {
+            return Ok(0);
+        }
+
+        if let Some(parent) = self.path.parent() {
+            fs::create_dir_all(parent)?;
+            restrict(parent, 0o700)?;
+        }
+        let mut buf = String::new();
+        for event in &fresh {
+            buf.push_str(
+                &serde_json::to_string(event).map_err(|e| ClientError::Http(e.to_string()))?,
+            );
+            buf.push('\n');
+        }
+        let mut file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.path)?;
+        file.write_all(buf.as_bytes())?;
+        restrict(&self.path, 0o600)?;
+
+        for event in fresh.iter() {
+            self.ids.insert(event.id.clone());
+        }
+        self.events.extend(fresh.iter().cloned());
+        self.events.sort_by_key(|e| e.created_at);
+        Ok(fresh.len())
+    }
+}
+
 #[cfg(unix)]
 fn restrict(path: &Path, mode: u32) -> io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
@@ -151,6 +304,30 @@ fn hex_to_32(s: &str) -> Option<[u8; 32]> {
 pub fn follow_invite(identity: &Identity, link: &str) -> Result<Event, ClientError> {
     let target = link_target(link).map_err(ClientError::Invite)?;
     Ok(invite::follow_public_link(&identity.nostr_pubkey_hex(), &target).sign(identity))
+}
+
+/// The invite link as a scannable QR code, a standalone SVG document.
+///
+/// What it encodes is the full `https://knownby.work/i/<npub>` URL, never
+/// the bare key. A phone camera turns a URL into something tappable, and
+/// what it opens is the page that offers the app — so one scan is both
+/// "join this person" and "here is the client", which is the whole point of
+/// showing a code to someone standing in front of you. A bare npub scans as
+/// text and leads nowhere.
+///
+/// Dark-on-white whatever the surrounding theme is doing. A QR is read by a
+/// camera, not by a person: inverted and low-contrast codes fail on enough
+/// scanners that theming this would be decoration bought with the only
+/// thing it does.
+pub fn invite_qr_svg(link: &str) -> Result<String, ClientError> {
+    let code = QrCode::new(link.as_bytes()).map_err(|_| ClientError::QrTooLong(link.len()))?;
+    Ok(code
+        .render()
+        .min_dimensions(240, 240)
+        .quiet_zone(true)
+        .dark_color(svg::Color("#0f0d1a"))
+        .light_color(svg::Color("#ffffff"))
+        .build())
 }
 
 /// Accept either a full URL or a bare npub/hex — people paste both.
@@ -444,5 +621,179 @@ mod tests {
         assert!(report.delivered.is_empty());
         assert_eq!(report.errors.len(), 1);
         assert_eq!(sync.cursor("http://127.0.0.1:1"), None);
+    }
+}
+
+#[cfg(test)]
+mod qr_tests {
+    use super::*;
+
+    /// A real invite link — the only input this is ever given.
+    const LINK: &str =
+        "https://knownby.work/i/npub1qqqsyqcyq5rqwzqfpg9scrgwpugpzysnzs23v9ccrydpk8qarc0jt2v";
+
+    #[test]
+    fn invite_link_renders_a_standalone_svg() {
+        let svg = invite_qr_svg(LINK).expect("a link this size always fits");
+        assert!(
+            svg.starts_with("<?xml") || svg.starts_with("<svg"),
+            "{svg:.40}"
+        );
+        assert!(svg.ends_with("</svg>"));
+        assert!(svg.contains("#ffffff"), "light modules must stay light");
+    }
+
+    /// The scanner reads the URL, not the key: encoding the bare npub would
+    /// scan as text and give whoever scanned it nothing to open.
+    #[test]
+    fn encodes_the_url_so_a_camera_has_something_to_open() {
+        let code = QrCode::new(LINK.as_bytes()).unwrap();
+        let bare =
+            QrCode::new("npub1qqqsyqcyq5rqwzqfpg9scrgwpugpzysnzs23v9ccrydpk8qarc0jt2v".as_bytes())
+                .unwrap();
+        // Not an assertion about QR internals — just that the two are
+        // different payloads, so a later "simplify" that swaps one for the
+        // other fails here rather than silently shipping a dead code.
+        assert_ne!(code.width(), 0);
+        assert_ne!(bare.width(), 0);
+        assert!(
+            invite_qr_svg(LINK).unwrap()
+                != invite_qr_svg("npub1qqqsyqcyq5rqwzqfpg9scrgwpugpzysnzs23v9ccrydpk8qarc0jt2v")
+                    .unwrap()
+        );
+    }
+
+    /// The ceiling is real but far away; this pins that a plausible link
+    /// never approaches it, so `QrTooLong` stays an unreachable branch
+    /// rather than a lurking failure on a longer hostname.
+    #[test]
+    fn a_much_longer_link_still_fits() {
+        let long = format!(
+            "https://{}.example.org/i/{}",
+            "a".repeat(120),
+            "b".repeat(63)
+        );
+        assert!(invite_qr_svg(&long).is_ok(), "{} bytes", long.len());
+    }
+}
+
+#[cfg(test)]
+mod store_tests {
+    use super::*;
+    use qw_protocol::identity::Identity;
+
+    use qw_protocol::events::{profile_skill_tags, ProfileSkillTags};
+
+    fn signed(identity: &Identity, tag: &str) -> Event {
+        profile_skill_tags(
+            &identity.nostr_pubkey_hex(),
+            &ProfileSkillTags {
+                display_name: None,
+                skill_tags: vec![tag.to_string()],
+            },
+        )
+        .sign(identity)
+    }
+
+    #[test]
+    fn held_events_survive_a_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let id = Identity::generate();
+
+        let mut store = EventStore::open(dir.path()).unwrap();
+        assert!(store.is_empty());
+        assert_eq!(
+            store
+                .append([signed(&id, "it/backend/languages#rust")])
+                .unwrap(),
+            1
+        );
+
+        let reopened = EventStore::open(dir.path()).unwrap();
+        assert_eq!(
+            reopened.len(),
+            1,
+            "a sync must outlive the process that did it"
+        );
+        assert_eq!(reopened.rejected(), 0);
+    }
+
+    /// A mailbox is untrusted infrastructure — §8 allows it to withhold mail
+    /// but not to inject any. That only holds if the thing writing to disk
+    /// enforces it, so this is the guarantee, not a nicety.
+    #[test]
+    fn an_event_that_does_not_verify_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let id = Identity::generate();
+        let mut forged = signed(&id, "it/backend/languages#rust");
+        forged.content = r#"{"skill_tags":["it/security#pentest"]}"#.to_string();
+
+        let mut store = EventStore::open(dir.path()).unwrap();
+        assert_eq!(store.append([forged]).unwrap(), 0);
+        assert!(store.is_empty());
+        assert!(
+            EventStore::open(dir.path()).unwrap().is_empty(),
+            "and nothing was written for a later load to pick up"
+        );
+    }
+
+    /// Tampering with the file directly is the same attack one layer down.
+    /// The store loses the record rather than trusting it, and says how many.
+    #[test]
+    fn a_tampered_line_is_skipped_and_counted_not_trusted() {
+        let dir = tempfile::tempdir().unwrap();
+        let id = Identity::generate();
+        let mut store = EventStore::open(dir.path()).unwrap();
+        store
+            .append([signed(&id, "it/backend/languages#rust")])
+            .unwrap();
+
+        let path = dir.path().join("events.jsonl");
+        let raw = fs::read_to_string(&path).unwrap();
+        fs::write(&path, raw.replace("languages#rust", "languages#java")).unwrap();
+
+        let reopened = EventStore::open(dir.path()).unwrap();
+        assert!(
+            reopened.is_empty(),
+            "an edited record must not be readable as evidence"
+        );
+        assert_eq!(reopened.rejected(), 1, "and its loss must be visible");
+    }
+
+    /// A crash mid-append leaves a partial trailing line. It costs that one
+    /// event and nothing else — the file must not become unreadable.
+    #[test]
+    fn a_truncated_trailing_line_costs_one_event_not_the_store() {
+        let dir = tempfile::tempdir().unwrap();
+        let id = Identity::generate();
+        let mut store = EventStore::open(dir.path()).unwrap();
+        store
+            .append([signed(&id, "it/backend/languages#rust")])
+            .unwrap();
+
+        let path = dir.path().join("events.jsonl");
+        let mut raw = fs::read_to_string(&path).unwrap();
+        raw.push_str("{\"id\":\"half-writ");
+        fs::write(&path, raw).unwrap();
+
+        let reopened = EventStore::open(dir.path()).unwrap();
+        assert_eq!(reopened.len(), 1);
+        assert_eq!(reopened.rejected(), 1);
+    }
+
+    #[test]
+    fn the_same_event_twice_is_stored_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let id = Identity::generate();
+        let event = signed(&id, "it/backend/languages#rust");
+
+        let mut store = EventStore::open(dir.path()).unwrap();
+        assert_eq!(
+            store.append([event.clone(), event.clone()]).unwrap(),
+            1,
+            "within a batch"
+        );
+        assert_eq!(store.append([event]).unwrap(), 0, "and across calls");
+        assert_eq!(EventStore::open(dir.path()).unwrap().len(), 1);
     }
 }

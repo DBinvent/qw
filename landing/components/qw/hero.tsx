@@ -1,5 +1,6 @@
-import { ArrowRight, ExternalLink } from 'lucide-react'
-import { SOURCE_LABEL, SOURCE_URL } from '@/lib/links'
+import { ArrowRight, Download, ExternalLink } from 'lucide-react'
+import { ANDROID_APK_URL, SOURCE_LABEL, SOURCE_URL } from '@/lib/links'
+import { AndroidFacts } from '@/components/qw/android-release'
 
 export function Hero() {
   return (
@@ -21,12 +22,23 @@ export function Hero() {
           blockchain, no tokens-as-currency, no central authority.
         </p>
 
+{/* The download takes the filled style and "View source" drops to an
+            outline: two glow buttons side by side compete, and of the two the
+            APK is the one a visitor can act on. Both are still the same size
+            and adjacent, so neither reads as a footnote. */}
         <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
+          <a
+            href={ANDROID_APK_URL}
+            className="glow-violet inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-primary px-5 text-sm font-medium text-primary-foreground transition-transform hover:-translate-y-px"
+          >
+            <Download className="size-4" />
+            Download for Android
+          </a>
           <a
             href={SOURCE_URL}
             target="_blank"
             rel="noopener noreferrer"
-            className="glow-violet inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-primary px-5 text-sm font-medium text-primary-foreground transition-transform hover:-translate-y-px"
+            className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-border px-5 text-sm font-medium text-foreground transition-colors hover:bg-secondary/60"
           >
             <ExternalLink className="size-4" />
             {SOURCE_LABEL}
@@ -39,6 +51,17 @@ export function Hero() {
             <ArrowRight className="size-4" />
           </a>
         </div>
+
+        {/* One line, because a front-page download button that says nothing
+            about what it installs is how people end up surprised. Says what
+            the app is and what it is not, and links to the page carrying the
+            checksum and the rest of the limits. */}
+        <p className="mt-4 font-mono text-[11px] leading-relaxed text-muted-foreground">
+          A time book and time bank for open-source work · <AndroidFacts /> ·{' '}
+          <a href="/join" className="text-primary hover:text-primary/80">
+            sideload, not a store build
+          </a>
+        </p>
       </div>
     </section>
   )

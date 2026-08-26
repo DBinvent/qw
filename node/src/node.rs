@@ -10,9 +10,12 @@ use qw_protocol::events::{
     SkillQuery as SkillQueryContent,
 };
 use qw_protocol::identity::Identity;
+use qw_protocol::trust::earned_skill_tags;
 
 use crate::contact::Contact;
 use crate::routing::select_forward_targets;
+#[cfg(test)]
+use crate::routing::{select_forward_targets_ranked, MatchSource};
 
 /// What this node learned when it first relayed one query_id: who to
 /// send any resulting answer to, and (for hop 2+) which event it itself
@@ -70,7 +73,13 @@ struct RelayArgs<'a> {
 pub struct Node {
     identity: Identity,
     contacts: HashMap<String, Contact>,
+    /// What this node says it can do — the self-published profile.
     own_skill_tags: Vec<String>,
+    /// What it has actually done: tags from contracts it completed and a
+    /// counterparty countersigned. Refreshed by
+    /// [`Node::refresh_earned_skill_tags`] rather than set by hand, because
+    /// the whole value of the list is that its author did not choose it.
+    own_earned_skill_tags: Vec<String>,
     relay_table: HashMap<String, RelayState>,
     /// query_ids already processed by this node — first arrival wins.
     /// Bounds propagation on a cyclic contact graph; see NIP-QW06's scope
@@ -84,6 +93,7 @@ impl Node {
             identity,
             contacts: HashMap::new(),
             own_skill_tags: Vec::new(),
+            own_earned_skill_tags: Vec::new(),
             relay_table: HashMap::new(),
             seen: HashSet::new(),
         }
@@ -103,6 +113,36 @@ impl Node {
 
     pub fn set_own_skill_tags(&mut self, tags: Vec<String>) {
         self.own_skill_tags = tags;
+    }
+
+    /// Recompute this node's own earned tags and every contact's, from the
+    /// records currently held.
+    ///
+    /// `Node` keeps no event store — events arrive per call — so this is the
+    /// seam where the caller's view of history becomes routable. Until it is
+    /// called, only declared tags are in play and behaviour is exactly what
+    /// it was before earned tags existed.
+    ///
+    /// Recomputed wholesale rather than accumulated: a record that turns out
+    /// to be invalid, or a history that shrinks because a relay stopped
+    /// serving something, must be able to take a tag away again. An earned
+    /// set that only ever grew would be a cache pretending to be evidence.
+    pub fn refresh_earned_skill_tags(&mut self, events: &[Event]) {
+        self.own_earned_skill_tags = earned_skill_tags(events, &self.pubkey());
+        for contact in self.contacts.values_mut() {
+            contact.earned_skill_tags = earned_skill_tags(events, &contact.pubkey);
+        }
+    }
+
+    /// Declared or earned — either makes this node an answer to the query.
+    ///
+    /// Earned is not merely *also* accepted, it is the case that matters:
+    /// someone with a countersigned history in a skill they never got round
+    /// to advertising is exactly who a query is looking for, and matching on
+    /// the profile alone made them silent.
+    fn matches_own(&self, skill_tag: &str) -> bool {
+        self.own_skill_tags.iter().any(|t| t == skill_tag)
+            || self.own_earned_skill_tags.iter().any(|t| t == skill_tag)
     }
 
     /// Hop 1 entry point: privately asked (out of protocol scope, per
@@ -211,7 +251,7 @@ impl Node {
         } = args;
         let mut outcome = RelayOutcome::default();
 
-        if self.own_skill_tags.iter().any(|t| t == skill_tag) {
+        if self.matches_own(skill_tag) {
             let content = SkillAnswerContent {
                 query_id: query_id.to_string(),
                 responder_pubkey: self.pubkey(),
@@ -392,5 +432,130 @@ mod tests {
             "already-seen query_id must be dropped, not reprocessed"
         );
         assert!(second.deliveries.is_empty());
+    }
+
+    // --- earned skill tags reach routing end to end ---
+
+    const RUST: &str = "it/backend/languages#rust";
+
+    /// A finished, countersigned Rust contract between two identities.
+    /// Built before either identity is moved into a `Node`.
+    fn countersigned_rust(client: &Identity, worker: &Identity) -> Vec<Event> {
+        use qw_protocol::events::{job_completion, job_offer, JobCompletion, JobOffer};
+        let offer = job_offer(
+            &client.nostr_pubkey_hex(),
+            &worker.nostr_pubkey_hex(),
+            &JobOffer {
+                skill_tags: vec![RUST.to_string()],
+                hours: 8.0,
+                rate: 40.0,
+                ko: None,
+                km: None,
+                terms: "backend work".to_string(),
+            },
+        )
+        .sign(client);
+        let done = JobCompletion {
+            rating: Some(5),
+            note: None,
+        };
+        let worker_side = job_completion(
+            &worker.nostr_pubkey_hex(),
+            &client.nostr_pubkey_hex(),
+            &offer.id,
+            &done,
+        )
+        .sign(worker);
+        let client_side = job_completion(
+            &client.nostr_pubkey_hex(),
+            &worker.nostr_pubkey_hex(),
+            &offer.id,
+            &done,
+        )
+        .sign(client);
+        vec![offer, worker_side, client_side]
+    }
+
+    fn query_event(outcome: &RelayOutcome) -> &Event {
+        match &outcome.deliveries[0] {
+            Delivery::Query { event, .. } => event,
+            _ => panic!("expected a query delivery"),
+        }
+    }
+
+    /// The point of the whole change, through the real relay path: a node
+    /// that has done countersigned Rust work and published no profile at all
+    /// answers a Rust query — and demonstrably did not before.
+    #[test]
+    fn proven_work_answers_a_query_with_no_profile_published() {
+        let asker = Identity::generate();
+        let doer = Identity::generate();
+        let events = countersigned_rust(&asker, &doer);
+
+        let mut hop1 = Node::new(asker);
+        let mut hop2 = Node::new(doer);
+        linked(&mut hop1, &mut hop2);
+        assert!(
+            hop2.own_skill_tags.is_empty(),
+            "hop2 declares nothing; evidence is all it has"
+        );
+
+        let before = hop1.begin_relay_chain("q-before", RUST, 3, "requester");
+        let asked_before = hop2.receive_query(&hop1.pubkey(), query_event(&before), 1_000);
+        assert!(
+            asked_before.own_match.is_none(),
+            "before refreshing, only declared tags count — the prior behaviour"
+        );
+
+        hop2.refresh_earned_skill_tags(&events);
+
+        let after = hop1.begin_relay_chain("q-after", RUST, 3, "requester");
+        let asked_after = hop2.receive_query(&hop1.pubkey(), query_event(&after), 1_000);
+        assert_eq!(
+            asked_after
+                .own_match
+                .as_ref()
+                .map(|m| m.matched_skill_tag.as_str()),
+            Some(RUST),
+            "a countersigned history must answer the query it is evidence for"
+        );
+    }
+
+    /// Forwarding sees it too, and labels it: the contact reachable only by
+    /// earned tags outranks one who merely claims the domain.
+    #[test]
+    fn earned_tags_rank_a_contact_above_a_declared_one() {
+        let me = Identity::generate();
+        let proven = Identity::generate();
+        let events = countersigned_rust(&me, &proven);
+        let proven_pubkey = proven.nostr_pubkey_hex();
+
+        let mut node = Node::new(me);
+        node.add_contact(Contact::new(&proven_pubkey, ContactPolicy::open()));
+        node.add_contact(
+            Contact::new("claimer", ContactPolicy::open()).with_cached_tags(vec![RUST.to_string()]),
+        );
+        node.refresh_earned_skill_tags(&events);
+
+        let ranked = select_forward_targets_ranked(node.contacts(), RUST);
+        assert_eq!(ranked[0].0.pubkey, proven_pubkey);
+        assert_eq!(ranked[0].1, MatchSource::Earned);
+        assert_eq!(ranked[1].1, MatchSource::Declared);
+    }
+
+    /// Recomputed, not accumulated: history that stops being visible has to
+    /// take the tag with it, or the set is a cache pretending to be proof.
+    #[test]
+    fn refreshing_against_an_empty_history_clears_earned_tags() {
+        let me = Identity::generate();
+        let peer = Identity::generate();
+        let events = countersigned_rust(&me, &peer);
+
+        let mut node = Node::new(me);
+        node.refresh_earned_skill_tags(&events);
+        assert!(!node.own_earned_skill_tags.is_empty());
+
+        node.refresh_earned_skill_tags(&[]);
+        assert!(node.own_earned_skill_tags.is_empty());
     }
 }

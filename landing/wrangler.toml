@@ -12,7 +12,11 @@ directory = "./out"
 binding = "ASSETS"
 # /i/* too: invite links are served by the Worker so their OG tags can be
 # rewritten per npub before a LinkedIn scraper reads them (src/worker.ts).
-run_worker_first = ["/api/*", "/i/*"]
+# /gh/* is the short form of the same link — the Worker asks GitHub for the
+# npub published on that handle's profile and redirects to /i/<npub>.
+# /download/* resolves the current release from the manifest and redirects
+# to the immutable versioned file — so a publish never needs a site deploy.
+run_worker_first = ["/api/*", "/i/*", "/gh/*", "/download/*"]
 
 [vars]
 # API origin this Worker forwards /api/* to — the only backend the site has.

@@ -22,26 +22,53 @@ export const REPO_README_URL = `${REPO_BLOB}/README.md`
 export const APP_README_URL = `${REPO_BLOB}/app/README.md`
 export const nipUrl = (file: string) => `${REPO_BLOB}/protocol/nips/${file}`
 
-// The Android build. Binaries are not in this repo: apt.dbinvent.com/paks/
-// is the release area on the build host (nginx behind Cloudflare), the same
-// place the Atria eval kit ships from. An APK is a build output, not source
-// — in git it bloats every clone forever and still only reaches a visitor
-// when the site redeploys.
+// The Android build. Binaries are not in this repo — an APK is a build
+// output, not source, and in git it bloats every clone forever while still
+// only reaching a visitor when the site redeploys.
 //
-// The host is deliberately one constant. Serving downloads from dbinvent.com
-// while the site is knownby.work mixes two identities; the fix, when that is
-// worth doing, is a downloads.knownby.work CNAME onto the same nginx behind
-// the same Cloudflare cache — after which only this line changes.
-const DOWNLOADS_BASE = 'https://apt.dbinvent.com/paks'
+// app.knownby.work is the release host: nginx on the build machine, behind
+// the tunnel and the Cloudflare edge.
+//
+// **Nothing here names a version.** A publish drops a new file, updates the
+// manifest and repoints the `-latest` symlink; the site follows without
+// being rebuilt or redeployed. Hard-coding the filename made every release
+// also a site deploy, and left the page able to be wrong about its own
+// checksum in between. Same shape as the Atria eval kit
+// (`atria-eval.json` + `atria-eval-latest.tar.gz`) and RDBM's downloads
+// list — three projects, one convention.
+const DOWNLOADS_BASE = 'https://app.knownby.work'
 
-// The versioned name carries the content hash, so the edge holds it immutable
-// for a year (the $paks_cache map in nginx-apt.conf keys off the version in
-// the filename). A new release publishes a new name and edits these four
-// lines; it never overwrites an old one, whose bytes are cached everywhere.
-export const ANDROID_APK_URL = `${DOWNLOADS_BASE}/qw-android-arm64-0.1.0-376db940.apk`
-export const ANDROID_APK_VERSION = '0.1.0'
-export const ANDROID_APK_SIZE = '17.2 MB'
-// Printed on the join page so a sideloaded binary can be checked against the
-// site that told you to install it — `sha256sum` on the file must match.
-export const ANDROID_APK_SHA256 =
-  '376db9403204aff432454bd5d750f58ec428e3d129e878210fd36c62c77da234'
+/** Shape of that manifest. Written by the publish step, never by hand. */
+export type AndroidRelease = {
+  version: string
+  file: string
+  abi: string
+  min_sdk: number
+  sha256: string
+  bytes: number
+}
+
+/**
+ * The pre-JS href: a Worker route on this origin that reads the manifest and
+ * redirects to the current versioned file (see `src/worker.ts`).
+ *
+ * Deliberately *not* `-latest.apk`. That symlink is served with
+ * `max-age=300, must-revalidate` so it can track releases — correct for a
+ * pointer, ruinous for 18 MB of payload, which would then revalidate at the
+ * edge on every download. The redirect is what is short-lived; its target is
+ * the versioned name, cached immutably for a year.
+ */
+export const ANDROID_APK_URL = '/download/android'
+
+/** The exact file for a resolved release — immutable, and what a client
+ *  with JavaScript should link to directly, skipping the redirect hop. */
+export const androidFileUrl = (release: AndroidRelease) =>
+  `${DOWNLOADS_BASE}/${release.file}`
+
+/**
+ * Read at view time for the facts a download page should state — version,
+ * size, checksum. Served `Access-Control-Allow-Origin: *` by the origin,
+ * since everything under it is a public download anyway.
+ */
+export const ANDROID_MANIFEST_URL = `${DOWNLOADS_BASE}/qw-android-arm64.json`
+

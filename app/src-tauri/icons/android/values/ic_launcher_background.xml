@@ -1,4 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-  <color name="ic_launcher_background">#fff</color>
+  <!-- The plate behind the adaptive foreground layer. Tauri's default is
+       #fff, which was right for a mark drawn in dark ink; this one is violet
+       on near-black, so a white plate would show as a bright ring around a
+       dark glyph on every launcher that masks to a circle. -->
+  <color name="ic_launcher_background">#0f0d1a</color>
 </resources>

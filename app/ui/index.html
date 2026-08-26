@@ -36,6 +36,29 @@
            font-size: 15px; cursor: pointer; touch-action: manipulation; }
   button:active { background: #6d28d9; }
   .muted { color: #a1a1aa; }
+  /* One row per skill, badges on the right. Two evidence axes that are
+     independent of each other, so they are two chips rather than one
+     combined rank — there is no exchange rate between "someone reviewed
+     your GitHub" and "someone paid you and signed for it". */
+  .skills { list-style: none; margin: .25rem 0 0; padding: 0; }
+  .skills li { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem;
+               padding: .55rem 0; border-top: 1px solid #27272a; }
+  .skills li:first-child { border-top: 0; }
+  .skill-tag { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 13px;
+               overflow-wrap: anywhere; margin-right: auto; }
+  .badge { font-size: 11px; line-height: 1; padding: .32rem .5rem; border-radius: 999px;
+           border: 1px solid #27272a; color: #a1a1aa; white-space: nowrap; }
+  /* The countersigned one is the only badge that costs someone else a
+     signature, so it is the only one that gets the accent. */
+  .badge.contract { border-color: #4c1d95; color: #c4b5fd; }
+  /* The QR sits on its own white plate whatever the theme is doing: a
+     camera needs light modules to be light, and this page is near-black.
+     Capped so it never grows past a comfortable phone-screen square, and
+     centred because the person scanning it is looking at the screen from
+     the other side of a table. */
+  .qr { display: block; margin: 0 auto; width: 100%; max-width: 15rem;
+        background: #fff; border-radius: .5rem; padding: .6rem; box-sizing: border-box; }
+  .qr svg { display: block; width: 100%; height: auto; }
 </style>
 </head>
 <body>
@@ -43,7 +66,15 @@
   <h1>QW</h1>
 
   <section>
-    <div class="muted">Your invite link — post it anywhere your work history already lives.</div>
+    <div class="muted">Your invite link — post it anywhere your work history already lives,
+      or let someone scan it.</div>
+    <!-- Filled from the identity command; the SVG is built in Rust
+         (qw_client_core::invite_qr_svg) because this page has no bundler
+         and so no QR library. Empty until then rather than a placeholder
+         square, which would look like a code that failed to scan. -->
+    <div class="qr" id="qr" hidden></div>
+    <p class="muted" id="qr-caption" hidden>Scanning this opens the invite page:
+      one tap to install the app, one to be introduced.</p>
     <p><code id="link">…</code></p>
     <button id="copy">Copy</button>
     <p class="muted" id="copy-status"></p>
@@ -55,6 +86,14 @@
               autocapitalize="none" autocorrect="off" inputmode="url"></p>
     <button id="follow">Follow</button>
     <p class="muted" id="follow-status"></p>
+  </section>
+
+  <section>
+    <div class="muted">Your skills. Badges are the evidence: a review, or
+      contracts a counterparty countersigned.</div>
+    <ul class="skills" id="skills"></ul>
+    <p class="muted" id="skills-empty">Nothing yet. Publish a skill, or complete
+      a contract and it appears here on its own.</p>
   </section>
 
   <section>
@@ -70,14 +109,84 @@
 // package in for one function.
 const invoke = window.__TAURI__.core.invoke;
 
-const me = await invoke('identity');
-document.getElementById('link').textContent = me.invite_link;
+// Everything the identity command feeds, in one function so a sync can
+// re-render it. A delivered countersigned completion changes what is
+// earned, and a stale list left on screen would be the visible half of
+// that bug.
+let me;
+async function showIdentity() {
+  me = await invoke('identity');
+  document.getElementById('link').textContent = me.invite_link;
+
+  renderSkills(me.skills || []);
+
+  // innerHTML with app-built markup would normally be the wrong reflex.
+  // Here the string is an SVG this app generated in its own process from
+  // its own public key, never anything a peer sent, and the CSP is
+  // `default-src 'self'` — so there is no remote content and no script to
+  // inject. The alternative is parsing an SVG by hand for no gain.
+  if (me.invite_qr) {
+    const qr = document.getElementById('qr');
+    qr.innerHTML = me.invite_qr;
+    qr.hidden = false;
+    document.getElementById('qr-caption').hidden = false;
+  }
+}
+
+await showIdentity();
 
 // navigator.clipboard needs a secure context, which the Android WebView's
 // custom asset protocol is not guaranteed to be. Fall back to the old
 // execCommand path, and if even that is refused say so rather than
 // silently doing nothing — the link is selectable text either way
 // (`user-select: all` above), so a copy is always possible by hand.
+// One list, up to two badges a row. Rebuilt from scratch each render —
+// this runs again after a sync, and a delivered completion can change a
+// badge on a row that already exists.
+//
+// textContent throughout, never innerHTML: a skill tag is normalized
+// taxonomy today, but it arrives from signed records that other people
+// wrote, and the day one carries markup is not the day to find out this
+// took a shortcut.
+function renderSkills(skills) {
+  const list = document.getElementById('skills');
+  const empty = document.getElementById('skills-empty');
+  list.textContent = '';
+  empty.hidden = skills.length > 0;
+
+  for (const s of skills) {
+    const row = document.createElement('li');
+    const tag = document.createElement('span');
+    tag.className = 'skill-tag';
+    tag.textContent = s.tag;
+    row.appendChild(tag);
+
+    if (s.reviewed) {
+      row.appendChild(badge('reviewed · ' + s.reviewed, ''));
+    }
+    if (s.contracts > 0) {
+      // Rating only when a counterparty actually gave one. Printing 0.0 for
+      // "nobody said" would read as "they said it was terrible".
+      const stars = s.rating === null || s.rating === undefined
+        ? ''
+        : ' · ' + s.rating.toFixed(1) + '★';
+      const n = s.contracts === 1 ? '1 contract' : s.contracts + ' contracts';
+      row.appendChild(badge(n + stars, 'contract'));
+    }
+    if (!s.reviewed && !s.contracts && s.declared) {
+      row.appendChild(badge('mentioned', ''));
+    }
+    list.appendChild(row);
+  }
+}
+
+function badge(text, extra) {
+  const el = document.createElement('span');
+  el.className = extra ? 'badge ' + extra : 'badge';
+  el.textContent = text;
+  return el;
+}
+
 async function copyText(text) {
   try {
     if (navigator.clipboard && window.isSecureContext) {
@@ -126,7 +235,13 @@ document.getElementById('sync').onclick = async () => {
       `${r.delivered} received, ${r.published} sent` +
       (r.still_queued ? `, ${r.still_queued} still queued` : '') +
       (r.rejected ? `, ${r.rejected} rejected by this client` : '') +
+      // The running total, not the delta: it is what everything else reads,
+      // and seeing it stay put after a sync is how you notice nothing landed.
+      `. ${r.held} record${r.held === 1 ? '' : 's'} held.` +
       (r.errors.length ? ` — ${r.errors.join('; ')}` : '');
+    // A sync can deliver a countersigned completion, which changes what is
+    // earned — so re-read it rather than leaving a stale list on screen.
+    await showIdentity();
   } catch (e) {
     status.textContent = String(e);
   }

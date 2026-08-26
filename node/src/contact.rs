@@ -43,11 +43,19 @@ impl ContactPolicy {
 pub struct Contact {
     pub pubkey: String,
     pub policy: ContactPolicy,
-    /// Skill tags this contact is locally known to have — what greedy
-    /// routing (`crate::routing::select_forward_targets`) matches
-    /// against. Populated out of band (a prior tag-exchange/gossip step,
-    /// gated by `policy.share_tags` on *their* side) — not by this NIP.
+    /// Skill tags this contact *says* they have: their self-published
+    /// profile (NIP-QW03), cached locally. Populated out of band (a prior
+    /// tag-exchange/gossip step, gated by `policy.share_tags` on *their*
+    /// side) — not by this NIP. Free to publish, and inflatable, which is
+    /// why routing ranks it below the earned set.
     pub cached_skill_tags: Vec<String>,
+    /// Skill tags this contact has *earned*: attached to contracts they
+    /// completed and the counterparty countersigned, derived by
+    /// `qw_protocol::trust::earned_skill_tags` from records this node
+    /// holds. Not inflatable — inventing one costs somebody else's
+    /// signature — and self-maintaining, so an established contact stays
+    /// routable without publishing a profile at all.
+    pub earned_skill_tags: Vec<String>,
     rate_window_day: Option<u64>,
     rate_window_count: u32,
 }
@@ -58,6 +66,7 @@ impl Contact {
             pubkey: pubkey.into(),
             policy,
             cached_skill_tags: Vec::new(),
+            earned_skill_tags: Vec::new(),
             rate_window_day: None,
             rate_window_count: 0,
         }
@@ -65,6 +74,16 @@ impl Contact {
 
     pub fn with_cached_tags(mut self, tags: Vec<String>) -> Self {
         self.cached_skill_tags = tags;
+        self
+    }
+
+    /// Set from `qw_protocol::trust::earned_skill_tags` over whatever
+    /// records this node holds about the contact. Kept separate from
+    /// `with_cached_tags` rather than merged into one list: routing has to
+    /// be able to tell a claim from a countersigned fact, and a merged
+    /// list would make that unrecoverable at the point it matters.
+    pub fn with_earned_tags(mut self, tags: Vec<String>) -> Self {
+        self.earned_skill_tags = tags;
         self
     }
 

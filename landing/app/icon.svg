@@ -1,14 +1,20 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="32" height="32">
-  <!-- The same mark as components/qw/logo.tsx: three nodes and the edges
-       between them, a web of trust in miniature. Colour is literal here
-       rather than currentColor — a favicon is rendered outside the page,
-       where no CSS variable resolves. Violet on transparent reads on both
-       a light and a dark browser chrome. -->
+  <!-- The same mark as components/qw/logo.tsx: five nodes and the edges
+       between them, drawn as an hourglass — two triangles meeting at a
+       shared waist. Still a web of trust in miniature; the hourglass reads
+       as the thing QW actually measures, which is time contributed.
+       Colour is literal here rather than currentColor — a favicon is
+       rendered outside the page, where no CSS variable resolves. Violet on
+       transparent reads on both a light and a dark browser chrome. -->
   <g fill="#a78bfa">
-    <circle cx="12" cy="5" r="1.8"/>
-    <circle cx="5" cy="16" r="1.8"/>
-    <circle cx="19" cy="16" r="1.8"/>
+    <circle cx="5.5" cy="3.5" r="1.7"/>
+    <circle cx="18.5" cy="3.5" r="1.7"/>
+    <circle cx="12" cy="12" r="1.7"/>
+    <circle cx="5.5" cy="20.5" r="1.7"/>
+    <circle cx="18.5" cy="20.5" r="1.7"/>
   </g>
-  <path d="M12 6.8 6 14.6M12 6.8l6 7.8M6.8 16h10.4"
-        stroke="#a78bfa" stroke-width="1.3" stroke-linecap="round" fill="none"/>
+  <!-- Centre-to-centre: fill and stroke are the same violet, so the overlap
+       under each node is invisible and the lines need no trimming. -->
+  <path d="M5.5 3.5h13M5.5 3.5 12 12l6.5-8.5M12 12l-6.5 8.5M12 12l6.5 8.5M5.5 20.5h13"
+        stroke="#a78bfa" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
 </svg>
