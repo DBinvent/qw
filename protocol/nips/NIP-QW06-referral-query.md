@@ -127,6 +127,27 @@ reading, documented there:
   simply never gets a cache entry, so it can never be a routing target
   for queries needing tag similarity to *me*).
 
+## Carriage (client note, not wire format)
+
+`qw_client_core` runs a `Node` per identity (2026-09-05). Two pragmatic
+choices there, neither a change to the 9050 / 9051 *content*:
+
+- **`["p", <next hop>]` on every 9050 forward.** The coordination mailbox
+  files mail by its `p` tag; without one it cannot carry a query onward.
+  A relay a contact subscribes to would not need it. The tag is added
+  before signing, so the event still verifies; it reveals to the mailbox
+  operator that hop N asked hop N+1 something — the traffic-pattern
+  exposure §8 already accepts for any mailbox use — and nothing about the
+  original requester.
+- **The client is its own hop 1.** The privacy-ideal path has the
+  requester send an *encrypted DM* to hop 1, which then signs the
+  chain-head forward, so hop 2 never learns who is asking. No such DM
+  channel exists yet, so `Session::find_by_skill` signs the chain head
+  itself: the requester's own contacts see it is asking (which they would
+  anyway), and hop 2 sees the requester as the vouching hop-1 node. The
+  query is still `max_hops`-bounded and greedy-routed; only the
+  requester-anonymity-past-hop-1 property is deferred.
+
 ## Scope note (MVP)
 
 The FAQ also notes "dedup by pubkey but keep path count — multiple

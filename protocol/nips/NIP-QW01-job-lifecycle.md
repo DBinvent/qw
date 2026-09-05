@@ -36,10 +36,33 @@ Tags: `["p", <worker pubkey>]`, one `["t", <skill tag>]` per offered skill.
 `hours`/`rate`/`ko`/`km` mirror `abstract.md`'s `Quants = Hours × Rate ×
 ko × km`: `ko` is the objective coefficient (equipment, conditions,
 hazard), `km` the subjective motivation/quality coefficient; both may be
-omitted (`null`) to simplify negotiation. `skill_tags` are taxonomy leaves
+omitted (`null`) to simplify negotiation.
+
+When a party actor on the contract is an **AI model** rather than a
+person, the two coefficients are read against the machine (`abstract.md`,
+"When a party actor is an AI model"): `ko` reflects the model's parameter
+count, usable context window, and agent-configuration quality (tools,
+scaffolding, retrieval); `km` reflects its cognitive reliability —
+prompt/spec adherence and hallucination rate. The fields, their optionality
+and the countersign-at-completion rule are unchanged.
+
+`skill_tags` are taxonomy leaves
 (`/taxonomy.yaml`); the `t` tags carrying them are what a relay filters on
 for referral routing (§3) — the content field is the source of truth,
 tags are a denormalized index of it.
+
+### Provenance: an offer that follows an introduction
+
+An offer made because of one specific NIP-QW07 introduction — the common
+case for an invite link, where the whole reason the link was published is
+an upcoming contract — additionally carries `["e", <introduction event
+id>, "", "introduction"]`. This is provenance only: the `content` is
+byte-for-byte an ordinary offer, this event's own id is still the
+contract anchor every later step references, and a client that does not
+know the `"introduction"` marker ignores the extra tag. The introduction
+(NIP-QW07) remains the contact edge; this offer remains a separate,
+independently-signed step. `qw_protocol::events::kinds::
+job_offer_from_introduction` builds it.
 
 ## Kind 9004 — Job counteroffer (optional, repeatable)
 

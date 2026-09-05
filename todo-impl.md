@@ -8,12 +8,25 @@ which added a "Basic Use Cases" section to `abstract.md` and matching Q&As to
 `qw-design-faq.md`. New items from that section are marked **(added
 2026-08-07)** below so it's clear which bullets predate the original plan.
 
-**What is left.** Completed items were removed on 2026-08-26 rather than
-left to accumulate: `git log`, the NIPs and the test suite record what was
-built, and a plan that is nine-tenths ticked boxes stops being read. Section
-numbers are the original ones — they are referenced from the NIPs and from
-code comments — so the gaps below (§1, §4, §6) are sections with nothing
-left open in them, not mistakes.
+**What is left.** Completed items are removed rather than left to
+accumulate (last pass 2026-09-05: a `Node` running in the client
+(contact book + referral query, `Session::find_by_skill`) + a per-viewer
+trust display (`Session::{trust, net_position}`), the NIP-QW12
+ledger-sync core (`qw_node::ledger` + `HttpLedger` + single-user
+`/ledger/*`) + `rank_servers` wiring + device-subkey resolver
+(`recovery::device_authority`, kind 9082), the replaceable profile kind
+(`10020`) + author `revision`, multi-user outbox persistence, KEK
+management + key page, account recovery (registration recovery code +
+seed export), `/auth/*` rate-limiting; 2026-09-04: profile editing,
+contract negotiation, the `KeyStore`/`HistoryStore`/`Session` split,
+single-user `qw-web`, and most of the multi-user host) —
+`git log`, the NIPs and the test suite
+record what was built, and a plan that is nine-tenths ticked boxes stops
+being read. Section numbers are the original ones — referenced from the
+NIPs and from code comments — so the gaps below (§1, §4, §6) are sections
+with nothing left open in them, not mistakes. **The `## Priority` list at
+the end is the current order**; the section items are the detail behind
+it.
 
 Client-side gaps are analysed separately in `app/app-todo.md` — what the
 app can do against what the protocol already supports and what the
@@ -68,6 +81,25 @@ This is the shared substrate everything else depends on.
       permanent anchor amendments chain from, which is the piece that was
       actually blocking this — device-key delegation itself is still
       unbuilt. Revisit before §7's multi-device support lands.
+
+      **The 9082 record and its resolver are built (2026-09-05).**
+      `KIND_DEVICE_SUBKEY = 9082` + `DeviceSubkey { device_pubkey, label,
+      valid_from, revoked_at? }` + `device_subkey()` builder
+      (`qw_protocol::events::kinds`), and in `qw_protocol::recovery`:
+      `controller_at(genesis, amendments, at)` (time-bounded controller
+      resolution; `latest_valid_controller` is now the no-bound case) and
+      `device_authority(account_id, amendments, subkey_events, signer, at)
+      -> DeviceAuthority::{Delegated, Revoked, Unknown}` — a 9082 counts
+      only if its own signature verifies *and* its publisher was the
+      controller at its `created_at`; revocation is not retroactive; a
+      re-delegation after a revocation restores authority; a signature
+      under a revoked key is `Revoked` (an alert), never a silent drop.
+
+      **Still open:** `identity.rs` itself still has controller == device
+      (1:1). Nothing yet *produces* 9082 events, and no live verification
+      path calls `device_authority` — it is a standalone helper, like
+      `verify_amendment` was before it. The re-sign-forward re-attestation
+      envelope (NIP-QW12 §"Two hazards…") is also still just proposed.
 - [ ] **Reviewed skills: a third evidence tier between mentioned and
       proven** (added 2026-08-26, from conversation). Today a skill tag is
       in one of two states, and the gap between them is most of a person's
@@ -134,9 +166,10 @@ This is the shared substrate everything else depends on.
 - [ ] **External identity links in the profile** (added 2026-08-26, from
       conversation). Accept and expect a list of links to the places a
       person's work already lives — GitHub, LinkedIn, GitLab, a homepage —
-      carried in the kind 9020 profile (NIP-QW03) beside `skill_tags`, and
-      offered as part of a self-introduction rather than as a separate
-      lookup. Today a QW identity is a bare key: correct, and unrecognisable
+      carried in the profile event (NIP-QW03, kind 10020) beside
+      `skill_tags`, and offered as part of a self-introduction rather than
+      as a separate lookup. Today a QW identity is a bare key: correct, and
+      unrecognisable
       to someone who knows the person by their GitHub handle.
 
       **Use Nostr's NIP-39 shape, do not invent one.** `["i",
@@ -306,13 +339,25 @@ since it's demoable standalone and is the differentiator.
 
 ---
 
-## 7. Mobile client (Tauri v2)
+## 7. Mobile client (Tauri v2) — and the hybrid web deployment
 
 The tooling gap that scoped this section is closed and so is the one after
 it: as of 2026-08-26 the Android build is signed, published, installed and
 run on a device. What is left is not "does it work" but reach — the OS
 integration that a sideloaded APK cannot have, the platform signer, the
 other platforms, and a distribution story that is not "trust this file".
+
+**Hybrid deployment (built 2026-09-02..04).** The same client runs three
+ways off one codebase: the Tauri app; a **single-user `qw-web`** server
+(open source, on the user's own box, key never leaves it); and a
+**multi-user `qw-web`** host where a passphrase unlocks an in-memory
+session for its lifetime, signs server-side, and shows an explicit
+disclaimer — no memory-dump protection, no uptime guarantee. `qw-web` is a
+*client* host, strictly separate from `qw-bo` (the coordination server).
+It is also the review vehicle — the same core, far easier to run in CI and
+read than a Tauri app needing a display + Android SDK. Multi-user is live
+at `qw.knownby.work`; what remains is in the item below and the `##
+Priority` list.
 
 - [ ] **Google Play — the current distribution target** (2026-08-26). A
       sideloaded arm64 APK from `app.knownby.work`, signed by a key
@@ -328,42 +373,98 @@ other platforms, and a distribution story that is not "trust this file".
       **iOS is shelved** as of the same date: it needs hardware that does
       not exist here, and shipping a second platform before the first is on
       a store is how both end up half-done.
-- [ ] **Profile editing in the client** (added 2026-08-26, from
-      conversation — this was a gap, not a deferral: nothing in §7 mentioned
-      it). `qw_protocol::events::profile_skill_tags` builds kind 9020 and
-      has tests; no UI calls it, so a person running the app today cannot
-      say what they do. That is the one thing a referral query matches
-      against (NIP-QW06), which makes an unpublishable profile the reason
-      the network cannot route to a new member at all.
 
-      **Not a text field.** NIP-QW03 requires normalization through
-      `/synonyms.yaml` *before* signing, because tag fragmentation
-      ("nodejs" vs "node.js") is unrecoverable once it is in a signed
-      record. So the editor is a picker over `/taxonomy.yaml` leaves with
-      synonyms resolving typed input — and both files have to ship inside
-      the app or be fetched and cached, which is a payload decision nobody
-      has made yet.
+- [ ] **Contract lifecycle past Accept — client UI.** The client composes
+      and negotiates offers (kinds 9000 / 9004 / 9001, built 2026-09-02),
+      but stops at Accept. Still no UI for milestones (9002), review
+      requests (9005), completion (9003) or the two-phase credit issuance
+      (9010) — all defined in `qw_protocol` with tests. The first
+      countersigned completion is what makes any *proven* skill badge
+      reachable from the app, so this closes the loop.
 
-      **Two surfaces, deliberately not merged.** Kind 9020 is the standing
-      self-description with no expiry; kind 9091 (NIP-QW11) is the
-      time-scoped "available for X" posting meant to be browsed. "Open to a
-      project" is the second one. An editor that collapses them turns a
-      standing claim into an advert that never expires.
+- [ ] **Multi-user `qw-web` — encrypted account store + layered unlock**
+      (built 2026-09-03..04, live; hardening + factors remain). Full design
+      in `app/server/multi-user.md`. One per-account **master key**, random,
+      generated once, **never at rest in the clear and never leaves server
+      RAM** — it encrypts the account blob (identity key + `HistoryStore`)
+      directly and never changes. Around it an ordered **KEK set**: each
+      row an independent wrapping of that same master, so adding / dropping
+      / rotating a factor is O(1) metadata with no blob re-encryption and
+      no identity change. Sources, weakest-standalone first: (1) a
+      user secret — passphrase / raw key / seed phrase, `Argon2id` in the
+      browser, the secret never transits; (2) a hardware key fob (FIDO2 /
+      YubiKey); (3) a user-attached KMS (AWS KMS etc.) — wrap/unwrap is a
+      `Decrypt` against a CMK in the *user's* account, server holds only
+      the wrapped master + ARN; (4) an authenticator / approval app; (5)
+      the qw mobile app, biometric-gated, its wrapping key a revocable
+      device subkey (NIP-QW09 kind 9082) on a phone that is already a
+      ledger replica (NIP-QW12). Every wrapping row is dated
+      (`created_at`, `not_after?`) and carries a `rotate` flag; a flagged
+      row is refused and re-wrapped on next login by another KEK. Losing
+      every KEK = identity loss → a one-time recovery-code wrapping +
+      seed export. Directory tier (nickname) stays under an operator
+      `server_key` with a blind index, separate from the master. Work is
+      entirely in the `qw-web` crate — an encrypted `KeyStore` /
+      `HistoryStore` over the RAM master plus an `unlock` module for the
+      KEK set; `Session` and both traits are unchanged. `qw.knownby.work`
+      is **public** — the host carries its own nickname/passphrase auth,
+      no Cloudflare Access (`--single` is the no-shared-surface option for
+      a personal box). Pairs with the ledger-sync item below (the
+      encrypted `HistoryStore` is the same seam a `LedgerTransport` merges
+      into).
 
-      **Partial disclosure is publish-or-not, per tag.** NIP-QW03 makes
-      skill tags public by necessity — relays holding pending referral
-      queries have to read them to route. There is no half-public tag, and
-      the editor must say so rather than implying one exists; the only
-      lever is which tags you publish, and an unpublished tag is simply
-      unroutable. Real selective disclosure lives on the *evidence* side
-      instead (`protocol/src/vc.rs`'s SD-JWT, where every field is
-      individually disclosable, and NIP-QW02's opt-in exact figure), which
-      is the right place for it: what you claim is cheap and public, what
-      you proved is yours to reveal.
+      **Built 2026-09-03/04, live at `qw.knownby.work` (`:8112`,
+      public, no Access).** `qw-web` crate: `envelope.rs` (`MasterKey`,
+      `Wrapping`, `KekKind`), `accounts.rs` + `accounts.schema.yaml`
+      (directory tier in Postgres via `marg` + `schema_guard_tokio` +
+      `sqlx`), `account_session.rs` (`EncHistoryStore` + `open_account` /
+      `seal_new_account`), `unlock.rs` (KEK set ops), `multiuser.rs`
+      (`MuWeb`: `/auth/register|login|logout` + the `/api/<cmd>`
+      routes behind `with_session`, token session table, sweeper).
+      `app/ui/index.html` shows a sign-in panel on the first 401. Deploy:
+      `raw/scripts/deploy-qw-web.sh` (default mode; `--single` for the
+      key-on-disk client) + `deploy/qw-web-mu.service`. Rate-limiting on
+      `/auth/register` + `/auth/login` is built (`src/ratelimit.rs`: 5/hour
+      per IP on register, 20/5min per IP + 10/5min per account on login).
+      Workspace 274 green + 2 Postgres round-trips. Full record:
+      `app/server/multi-user.md` and git. **2026-09-05:** outbox
+      persistence (the blob carries the `SyncState`), KEK management + key
+      page (`POST /api/kek_{list,add,drop,rotate,flag,recovery}`, `GET
+      /session`), and account recovery (`register` mints a recovery-code
+      KEK and returns it once; `POST /api/seed_export` gives the portable
+      `identity.key` hex). The must-finish list is clear; email-verify and
+      the delta blob format are parked as low-priority (see the `##
+      Priority` list).
+
+- [ ] **Multi-replica ledger sync — NIP-QW12** (spec'd 2026-09-02, the
+      anti-entropy core **built 2026-09-05**). One identity's ledger may
+      live on a phone and one or more `qw-web` boxes at once; they converge
+      by anti-entropy, not through the `qw-bo` mailbox (different trust
+      model, lifetime and direction — the two share no code). The ledger is
+      a grow-only set of content-addressed, self-verifying events, merge =
+      union, every view a pure fold — so a write from a stale replica adds
+      one element and cannot corrupt a profile or stall an algorithm.
+
+      **Built:** `qw_node::ledger` — `LedgerSync` (the anti-entropy round),
+      `LedgerTransport` trait (sibling to `qw_node::sync`), `LedgerCoverage`
+      (the **exact held-id set**; a per-author high-water cannot express "I
+      have everything after T but lack something before it", which is what
+      two devices that both authored produce — a negentropy digest is the
+      NIP's sanctioned later optimisation), `PullResponse`. Verify-on-ingest;
+      dedup by id (a same-second sibling has a different id, so the
+      inclusive-window off-by-one doesn't arise); a broken peer never stops
+      the others; 3+ replicas converge in one round via the middle.
+      `qw_client_core::Session::ledger_round(transport, peers)` merges
+      pulled events into the `HistoryStore` and folds the sync snapshot.
+
+      **Still open:** a real `LedgerTransport` impl (HTTP replica-to-replica
+      + `qw-web` `/ledger/*` endpoints) — belongs with the "run a `Node` in
+      the client" item — and the rotated-key-outbox re-attestation envelope
+      (§2 / NIP-QW09, still proposed).
 
 - [ ] **Earned-skill routing** — protocol, node and client halves are
-      **built** (2026-08-26); `qw_node`'s own refresh is not yet driven by
-      anything outside tests.
+      **built** (2026-08-26); a `Node` now runs in the client
+      (**2026-09-05**).
 
       The bug: routing matched `cached_skill_tags` only, so someone with ten
       countersigned Rust contracts and no `rust` tag published was
@@ -371,18 +472,28 @@ other platforms, and a distribution story that is not "trust this file".
       was the hardest to find. Worse, `relay_for` self-matched on declared
       tags too, so such a node stayed *silent* even when the query arrived.
 
-      Built: `qw_protocol::trust::earned_skill_tags` (tags of contracts
-      completed *and* countersigned — both sides' `KIND_JOB_COMPLETION` on
-      one offer; one side alone earns nothing); `Contact::earned_skill_tags`;
-      `routing::select_forward_targets_ranked` with `MatchSource` so a
-      querier can tell a countersigned match from a claimed one;
-      `Node::refresh_earned_skill_tags`; the self-match accepting either
-      source. On the client, `qw_client_core::EventStore` gives it something
-      to read and `app/src-tauri` surfaces the identity's own earned skills.
+      Built: `qw_protocol::trust::earned_skill_tags`;
+      `Contact::earned_skill_tags`; `routing::select_forward_targets_ranked`
+      with `MatchSource`; `Node::refresh_earned_skill_tags`; the self-match
+      accepting either source.
 
-      Remaining: nothing calls `Node::refresh_earned_skill_tags` outside
-      tests, because nothing yet runs a `Node` on the client. Until it does,
-      routing behaviour is byte-for-byte what it was.
+      **2026-09-05:** `qw_client_core::Session` holds a `Node`. On every
+      history change ([`refresh_node`]) it rebuilds the contact book from
+      held kind-9060 introductions, sets its own declared tags, and calls
+      `refresh_earned_skill_tags` over the whole ledger.
+      `Session::find_by_skill` originates a NIP-QW06 query (the session is
+      its own hop 1); `sync_now` routes inbound 9050 / 9051 through the
+      node and queues the forwards / answers it produces; a query's
+      answers land in `Session::referral_results`. `Node` now `p`-tags its
+      9050 forwards so the coordination mailbox can carry them, and adds
+      `Node::note_contact` (upsert cached tags without resetting a
+      contact's rate window). `qw-web` (`/api/{contacts,find_by_skill,
+      referral_results}`, single- and multi-user) and the Tauri commands
+      are wired.
+
+      Still open: the fully-hidden-requester path (an encrypted DM to hop
+      1 so hop 2 does not learn who is asking) — until then a query
+      reveals the requester to their own contacts.
 
       Two properties not to regress. **Reach, not trust** — a match found
       this way still scores through `score_trust_path` on completed work
@@ -410,40 +521,10 @@ other platforms, and a distribution story that is not "trust this file".
       one to answer accidentally inside a cache. Revisit when a real history
       makes it a problem, with §8's vault as the other half of the answer.
 
-      Now unblocked by it, and none of it built: contract composition, a
-      referral query from the client, any trust display, and driving a
-      `Node` so earned-skill routing runs for real.
-
-- [ ] **Move the profile to a replaceable event kind** (decided
-      2026-08-26). Kind 9020 sits in Nostr's *regular* range (1000-9999):
-      relays keep every event and none supersedes another. NIP-QW03 says so
-      — "publishing a new one does not retract the old one at the protocol
-      level" — and that was fine while nobody could edit a profile.
-
-      What settles it is what a profile *is*. Skill tags and availability
-      are a statement of intent about future contact; they do not confront
-      the past and are not evidence of anything. The ledger of countersigned
-      contracts is the record, and it is separate. So profile revision
-      history is noise, not history: keeping every edit forever preserves
-      nothing anyone should be reading, while costing three things — a
-      permanent public trail of every version of yourself, a fetch-all-and-
-      sort on every client, and a relay able to serve a stale profile
-      indistinguishably from a current one, which is a withholding surface
-      rather than mere storage waste.
-
-      Nostr's replaceable range (10000-19999, latest per pubkey+kind) is the
-      fix; addressable (30000-39999, plus a `d` tag) if profiles ever need
-      to be plural. Its own kind 0 metadata is replaceable for this exact
-      reason, and moving there also puts QW's profile where NIP-39 external
-      identity claims conventionally live.
-
-      Remaining work is the migration, not the decision: a new kind
-      constant, `profile_skill_tags` emitting it, readers preferring the new
-      kind and falling back to the most recent 9020, and NIP-QW03 amended.
-      Contracts stay append-only — evidence must accumulate, a current
-      statement must not. Do this before the editor ships, or the first
-      person to edit five times has five permanent public claims and no
-      protocol-level statement of which is current.
+      Unblocked by it and built: contract composition, driving a `Node` so
+      earned-skill routing runs for real, a referral query from the client,
+      and a per-viewer trust display (`Session::{trust, net_position}`,
+      `ContactView` trust fields — all 2026-09-05).
 
 - [ ] **NDA-covered work: decide whether silence needs a marker** (added
       2026-08-26, from conversation). Mostly already answered, recorded so
@@ -496,6 +577,13 @@ other platforms, and a distribution story that is not "trust this file".
       already written by `Vault`, and wording that does not imply anyone can
       help if it is lost.
 
+      **Half done 2026-09-05:** the multi-user `qw-web` key page has the
+      reveal — `POST /api/seed_export` over `Session::identity_secret_hex()`
+      (the 32-byte secret as `identity.key`-style hex), behind an explicit
+      "Show identity key" disclosure with loss-is-final wording. What is
+      left is the **Tauri** shell: the same reveal against the on-disk
+      `Vault`, and the deep-link / external-signer work below.
+
 - [ ] **OS deep links, external-signer delegation, and UI past
       identity/follow/sync** — the residue left behind when the client shell
       landed, recorded here rather than inside a finished item. Clicking
@@ -503,10 +591,13 @@ other platforms, and a distribution story that is not "trust this file".
       pasted, which is exactly the OS integration this section could never
       test. The `qw-signer:` URI protocol exists (`protocol/src/signer.rs`)
       but nothing on either platform speaks it, so the key still sits in the
-      app's data directory at `0600`. And the shell shows an invite link,
-      follows one, and syncs — no contract composition, no referral query,
-      no trust display, though all three exist in `qw-protocol`/`qw-node`
-      with tests and no UI.
+      app's data directory at `0600`. The shell now also composes contract
+      proposals and negotiates them, runs a referral query, and shows a
+      per-viewer trust read on every contact and negotiation counterparty
+      (`Session::{find_by_skill, contacts, referral_results, trust,
+      net_position}`, `qw-web` + Tauri + `app/ui/index.html`, 2026-09-05).
+      What is left in this item is the OS deep link and the external
+      signer.
 - [ ] Web app path: compose/display only; signing delegated via QR or deep
       link to the external signer.
       The delegation protocol it would use is done
@@ -517,8 +608,10 @@ other platforms, and a distribution story that is not "trust this file".
       quorum amendment (NIP-QW09) — under the controller/device-key hierarchy
       flagged in §2, device keys are added/removed beneath the controller
       directly. Amendment is only for the controller key itself.
-      Still open — the device-key hierarchy itself isn't built (§2's
-      `identity.rs` still treats controller and device as one key).
+      The signed record (kind 9082) and its resolver
+      (`recovery::device_authority`) exist as of 2026-09-05; still open is
+      the `identity.rs` hierarchy that produces and signs them, and a live
+      verification path — see the §2 item.
 
 ---
 
@@ -552,22 +645,24 @@ distinction is what keeps this section honest:
       the client/architecture gap analysis). This section's own first
       principle is that a client must still work — degraded, not broken —
       against direct relays alone, because otherwise the landing page's "no
-      central server" is false. Two concrete violations, both in the client
-      rather than here:
+      central server" is false.
 
-      - **There is no relay path at all.** `qw_client_core::HttpMailbox` is
-        the only `MailboxTransport` that exists. If the coordination server
-        is unreachable the client does not degrade, it stops. Nothing in the
-        protocol requires this — the transport trait is already the seam —
-        but no second implementation exists.
-      - **`server_registry::rank_servers` is never called from anywhere.**
-        It is written and tested; `AppState::servers` is a hardcoded
-        one-element `vec!["https://qw-dash-api.knownby.work"]`. Hard-coding
-        one server as authoritative is the exact thing this section forbids,
-        and the code to avoid it is already sitting there unused.
+      **`rank_servers` is wired (2026-09-05).** `Session::rank_servers(
+      &[ServerCandidate])` re-orders the server list by this identity's own
+      trust view (`qw_node::server_registry`), and `main.rs` + `src-tauri`
+      call it at setup. A blank server `pubkey` still scores as
+      unknown-risk (fee-order) until servers advertise one — but the list
+      is a ranked candidate set now, not one hard-coded authoritative URL,
+      and `MailboxSync` already fails over across it.
 
-      Both are wiring, not design. Until they land, "optional coordination
-      server" describes the protocol and not the product.
+      **Still open — a genuine second transport / relay path.**
+      `HttpMailbox` is still the only `MailboxTransport`; if every
+      coordination server is unreachable the mailbox path stops (the
+      NIP-QW12 `HttpLedger` added 2026-09-05 is replica-to-replica, a
+      different job). A direct-relay `MailboxTransport` (or accepting that
+      "degraded" means "ledger sync between your own replicas keeps
+      working, mailbox delivery to strangers pauses") is the remaining
+      design call. Pairs with "run a `Node` in the client".
 
 - [ ] Community insurance pool: explicitly last — depends on transaction
       volume existing first to fund the pool meaningfully.
@@ -654,29 +749,93 @@ the pilot is described anywhere else. What replaces it is distribution:
 
 ---
 
-## Remaining build order
+## Priority (2026-09-05)
 
-§1–§6 are complete; what follows is the order for what is not.
+§1–§6 are complete; the client (§7) and the coordination server (§8) are the
+work. Multi-user `qw-web` is deployed at `qw.knownby.work` and, as of
+2026-09-05, has no open items on the must-finish list — outbox persistence,
+KEK management + key page, and account recovery all landed. What is left is
+the standing client / protocol gaps, roughly in order.
 
-1. **§7 client + §8 coordination server — the current priority, together.**
-   Reordered 2026-08-25. The client is what makes any of this usable off a
-   dev machine, and a store-and-forward cache is what lets two clients that
-   are never online at the same moment exchange anything at all — §7's own
-   thin-client model ("syncs on relay wake") assumes something is holding
-   events until that wake. §8's original "only once organic usage justifies
-   it" was written about the *monetizable* services (rating bureau, broker
-   scores); it does not apply to plain message carriage, and its
-   preconditions are met either way — the peer-to-peer core §1–§6 works
-   standalone today.
-2. §10 pilot cohort launch
-3. §9 legal track — last
+*(Landed 2026-09-05, multi-user `qw-web`:*
+- ***Outbox persistence** — `qw_client_core::{SyncState, Session::sync_state,
+  Session::restore_sync_state}` + `MailboxSync::cursor_snapshot`; the
+  multi-user blob folds the outbox ids and poll cursors into the same
+  sealed payload, so an authored-but-unsent event and a warm cursor
+  survive a host restart.*
+- ***KEK management + key page** — `POST /api/kek_{list,add,drop,rotate,
+  flag,recovery}` behind the session cookie, over `unlock::*`; a
+  fetch→mutate→`set_wrappings` op serialised under the per-session lock
+  like `with_session`. `AccountStore::by_account_id` added. The shared
+  `app/ui/index.html` gains a "Keys" section — add / remove a passphrase,
+  (re)generate a recovery code, reveal the identity key — shown once a new
+  `GET /session` probe confirms a login host.*
+- ***Account recovery** — `register` now mints a recovery-code KEK and
+  returns it once (the UI reveals it straight after sign-up); `POST
+  /api/seed_export` hands back the 32-byte identity secret as hex
+  (`Session::identity_secret_hex`), the portable `identity.key` spelling,
+  so the identity survives total loss of the host blob.)*
+- ***Multi-replica ledger sync (NIP-QW12) + device subkeys (NIP-QW09 kind
+  9082)*** — the transport-agnostic cores: `qw_node::ledger`
+  (`LedgerSync` + `LedgerTransport` + exact-id-set `LedgerCoverage`),
+  `Session::ledger_round`, and `qw_protocol::recovery::{controller_at,
+  device_authority}` over `KIND_DEVICE_SUBKEY = 9082`.*
+- ***HTTP `LedgerTransport` + `rank_servers` wiring*** — `qw_client_core::
+  HttpLedger` (a real `LedgerTransport` over `/ledger/pull` + `/ledger/push`);
+  those two routes on the single-user `qw-web` host, so the operator's
+  phone can sync to their own box; `Session::rank_servers(&[ServerCandidate])`
+  + `Session::{servers, held_events}`, called from `main.rs` and
+  `src-tauri` at setup.*
+- ***Node in the client*** — `Session` holds a `Node`, rebuilds its
+  contact book from held introductions and refreshes earned tags on every
+  history change; `Session::find_by_skill` originates a NIP-QW06 referral
+  query (self as hop 1), `sync_now` relays inbound 9050/9051, answers land
+  in `Session::referral_results`. `qw-web` + Tauri commands
+  (`contacts` / `find_by_skill` / `referral_results`).
+- ***Per-viewer trust display*** — `Session::{trust, net_position}` +
+  `TrustView`; `ContactView` gained `trust_hops` / `trust_score` /
+  `net_position`; `qw-web` `/api/{trust,net_position}` + Tauri commands;
+  the UI shows it on every contact and negotiation counterparty. Never a
+  global number — a shortest verified `CreditIssuance` path (or
+  unknown-risk, not zero) computed from held records, with the path's
+  edge ids for spot-checking (§8).
 
-**Sequencing caveat, recorded rather than smoothed over:** §9 describes
-itself as running in parallel from the start and *gating external launch*,
-and its own first item is "get a written tax attorney opinion before any
-investor data room or public launch beyond a closed test cohort". With
-invite-only dropped (§10, 2026-08-25) there is no closed cohort to shelter
-under, so §10 *is* the public launch: running it before §9 means launching
-ahead of that opinion, deliberately. That is a business risk call, not an
-engineering one — the order above records it rather than resolving it.
+**Standing client / protocol gaps — the protocol is well ahead of the client:**
 
+1. **Finish the routing / replication wiring** (§8, §7 items) — landed
+   2026-09-05: `rank_servers`, `HttpLedger` + single-user `/ledger/*`, a
+   `Node` in the client, and a per-viewer trust display. Left: a
+   **genuine second `MailboxTransport`** (so mailbox delivery degrades
+   rather than stops), the **multi-user `qw-web` `/ledger/*`** (needs a
+   device-subkey auth channel), a **scheduled `sync_now` / `ledger_round`
+   loop**, and the fully-hidden-requester DM to hop 1.
+2. **Contract lifecycle past Accept** (§7 item) — milestones (9002),
+   completion (9003), review requests (9005), two-phase credit issuance
+   (9010) have no UI; the first countersigned completion is what makes a
+   *proven* skill badge reachable.
+3. **Key backup / reveal in the app** (§7 — the Tauri half; the `qw-web`
+   key page above already does this for a multi-user host via
+   `Session::identity_secret_hex`), **OS deep links + external signer**
+   (§7), **CI-built attested Play releases** (§7 Google Play).
+
+**Low priority / deferred (do not block the list above):**
+
+- **Email verification on the multi-user host** (was item 1, dropped down
+  2026-09-05). `qw-web`'s account is nick + passphrase with no email at
+  all; verification would mean *adding* one, for a "recovery used" notice
+  channel and account-takeover friction. Both are real but neither
+  blocks: rate-limiting covers the abuse case and the recovery code
+  covers lockout. A public host can add it later without reshaping
+  anything.
+- **Delta blob format** (perf only — `EncHistoryStore::append` and
+  `persist_sync_state` re-seal the whole payload, O(ledger)). Fine until a
+  real ledger makes it a problem.
+
+Then §10 (public invite links as the entry point, cascade-skip for those
+edges); §9 legal track last.
+
+**Sequencing caveat, recorded rather than smoothed over:** §9 gates
+external launch, and its first item is a written tax-attorney opinion
+before any public launch. Invite-only was dropped (§10, 2026-08-25), so §10
+*is* the public launch: it runs ahead of that opinion, deliberately — a
+business-risk call, not an engineering one.

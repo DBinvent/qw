@@ -1,6 +1,7 @@
 pub mod bootstrap;
 pub mod contact;
 pub mod graph;
+pub mod ledger;
 pub mod network;
 pub mod node;
 pub mod routing;

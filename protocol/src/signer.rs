@@ -195,6 +195,7 @@ mod tests {
         let phone = Identity::generate();
         let unsigned = profile_skill_tags(
             &phone.nostr_pubkey_hex(),
+            0,
             &ProfileSkillTags {
                 display_name: None,
                 skill_tags: vec!["it/backend/languages#rust".to_string()],
@@ -213,6 +214,7 @@ mod tests {
         let phone = Identity::generate();
         let unsigned = profile_skill_tags(
             &phone.nostr_pubkey_hex(),
+            0,
             &ProfileSkillTags {
                 display_name: Some("vk".to_string()),
                 skill_tags: vec![],
@@ -241,6 +243,7 @@ mod tests {
         let phone = Identity::generate();
         let unsigned = profile_skill_tags(
             &phone.nostr_pubkey_hex(),
+            0,
             &ProfileSkillTags {
                 display_name: None,
                 skill_tags: vec![],
@@ -265,6 +268,7 @@ mod tests {
         let attacker = Identity::generate();
         let unsigned = profile_skill_tags(
             &phone.nostr_pubkey_hex(),
+            0,
             &ProfileSkillTags {
                 display_name: None,
                 skill_tags: vec![],

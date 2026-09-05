@@ -1,17 +1,38 @@
 # QW client (§7)
 
-Two crates, split along the line of what can be built anywhere:
+Three crates, split along the line of what can be built anywhere:
 
 | | builds here | contains |
 |---|---|---|
-| `core/` — `qw-client-core` | **yes**, 6 tests | identity on disk, HTTP mailbox transport, invite-link following |
-| `src-tauri/` — `qw-app` | **no** (see below) | the window: Tauri commands over `core`, and `../ui` |
+| `core/` — `qw-client-core` | **yes** | identity on disk, event store, mailbox transport, invite-link following, profile + negotiation logic, and `Session` — one method per operation |
+| `server/` — `qw-web` | **yes** | a local web app: one `Session`, `POST /api/<cmd>` per operation, serves `../ui` |
+| `src-tauri/` — `qw-app` | **no** (see below) | the window: the same operations as `qw-web`, over Tauri IPC instead of HTTP |
 
-Everything with a rule in it lives in `core/`, deliberately. A Tauri crate
-cannot compile without GTK/WebKit development packages, so anything beside it
-is unbuildable and untestable on a machine that lacks them — including CI.
-`src-tauri/` is therefore as thin as it can be: parse an argument, call the
-core, hand back JSON.
+Everything with a rule in it lives in `core/`, deliberately. `Session` is the
+one place an operation is defined; `src-tauri/` and `server/` are each a shim
+that locks the session, calls the method, and returns JSON. A Tauri crate
+cannot compile without GTK/WebKit development packages, so `src-tauri/` is
+unbuildable and untestable on a machine (or CI) that lacks them — which is
+exactly why `qw-web` exists: it exercises the whole client over a real HTTP
+surface with only axum + tokio.
+
+## Running `qw-web`
+
+```
+cargo run -p qw-web
+# then open http://127.0.0.1:8787
+```
+
+Single-user: the identity key and event log are a `Vault` + `EventStore` in
+one data directory, the same as on the phone. Meant for a box the operator
+already trusts. Env: `QW_DATA_DIR` (default `qw-data`), `QW_WEB_ADDR`
+(default `127.0.0.1:8787`), `QW_SERVERS` (comma-separated).
+
+The **multi-user** host — per-account encryption under an in-RAM master key
+wrapped by a set of rotatable KEKs (passphrase / hardware fob / user KMS /
+approval app / biometric-gated phone), seed-unlocked sessions held in memory
+for their lifetime — is `server/multi-user.md`: spec'd, unbuilt, and entirely
+inside this crate (`Session` and the two traits do not change).
 
 `src-tauri/` is **not** a workspace member for the same reason; a member that
 cannot build would break `cargo test --workspace` for everyone. It has its own

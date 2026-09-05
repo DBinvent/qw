@@ -1,12 +1,17 @@
 [workspace]
 resolver = "2"
-members = ["protocol", "node", "app/core"]
+members = ["protocol", "node", "app/core", "app/server"]
 
 # `app/src-tauri` is deliberately NOT a workspace member: it cannot build
 # without Tauri's system libraries (webkit2gtk-4.1 and friends), and a
 # member that breaks `cargo test --workspace` on a machine without them
 # would make the whole repo unbuildable for everyone else. It carries its
 # own lockfile and is built from its own directory.
+#
+# `app/server` (qw-web) IS a member: it is the same `qw_client_core::Session`
+# as the Tauri shell, served over HTTP, and it builds with only axum + tokio
+# — so `cargo test --workspace` covers the client end to end without a
+# display or the Android SDK.
 
 [workspace.package]
 edition = "2021"

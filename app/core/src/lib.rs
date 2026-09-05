@@ -16,6 +16,23 @@
 //! - [`HttpMailbox`] — [`qw_node::sync::MailboxTransport`] over HTTP
 //!   against a coordination server's `/mailbox`.
 //! - [`follow_invite`] — the client half of NIP-QW07's public link.
+//! - [`profile`] / [`taxonomy`] — the client half of NIP-QW03: resolve
+//!   skill input through the bundled taxonomy, sign a replaceable profile
+//!   event (kind 10020) with a bumped `revision`.
+//! - [`negotiation`] — the client half of NIP-QW01's pre-signature steps:
+//!   propose a contract, counter it (reject-amend-reapply), accept it.
+
+pub mod negotiation;
+pub mod profile;
+pub mod session;
+pub mod taxonomy;
+
+pub use session::{HistoryStore, KeyStore, LedgerView, Session, SyncState, SyncView};
+
+#[doc(inline)]
+pub use qw_node::ledger::{LedgerCoverage, LedgerSync, LedgerTransport, PullResponse};
+#[doc(inline)]
+pub use qw_node::server_registry::{rank_servers, RankedServer, ServerCandidate};
 
 use std::collections::HashSet;
 use std::fs;
@@ -46,6 +63,10 @@ pub enum ClientError {
     /// in the thousands — but the encoder can say no and swallowing that
     /// would mean rendering a blank square.
     QrTooLong(usize),
+    /// A profile edit did not resolve (`session::set_profile`).
+    Profile(profile::ProfileError),
+    /// A negotiation step did not compose (`session::{propose,counter,accept}`).
+    Negotiation(negotiation::NegotiationError),
 }
 
 impl std::fmt::Display for ClientError {
@@ -61,6 +82,8 @@ impl std::fmt::Display for ClientError {
             ClientError::QrTooLong(n) => {
                 write!(f, "{n} bytes is too long to encode as a QR code")
             }
+            ClientError::Profile(e) => write!(f, "{e}"),
+            ClientError::Negotiation(e) => write!(f, "{e}"),
         }
     }
 }
@@ -70,6 +93,18 @@ impl std::error::Error for ClientError {}
 impl From<io::Error> for ClientError {
     fn from(e: io::Error) -> Self {
         ClientError::Io(e)
+    }
+}
+
+impl From<profile::ProfileError> for ClientError {
+    fn from(e: profile::ProfileError) -> Self {
+        ClientError::Profile(e)
+    }
+}
+
+impl From<negotiation::NegotiationError> for ClientError {
+    fn from(e: negotiation::NegotiationError) -> Self {
+        ClientError::Negotiation(e)
     }
 }
 
@@ -92,21 +127,12 @@ impl Vault {
     fn key_path(&self) -> PathBuf {
         self.dir.join("identity.key")
     }
+}
 
-    /// Load the identity, generating and saving one on first run.
-    pub fn load_or_create(&self) -> Result<Identity, ClientError> {
-        match self.load() {
-            Ok(Some(identity)) => Ok(identity),
-            Ok(None) => {
-                let identity = Identity::generate();
-                self.save(&identity)?;
-                Ok(identity)
-            }
-            Err(e) => Err(e),
-        }
-    }
-
-    pub fn load(&self) -> Result<Option<Identity>, ClientError> {
+/// The on-disk [`KeyStore`]: `identity.key`, `0600`, in the app-data
+/// directory. `load_or_create` is the trait default.
+impl KeyStore for Vault {
+    fn load(&self) -> Result<Option<Identity>, ClientError> {
         let path = self.key_path();
         if !path.exists() {
             return Ok(None);
@@ -118,7 +144,7 @@ impl Vault {
             .map_err(|_| ClientError::MalformedKeyFile(self.key_path()))
     }
 
-    pub fn save(&self, identity: &Identity) -> Result<(), ClientError> {
+    fn save(&self, identity: &Identity) -> Result<(), ClientError> {
         fs::create_dir_all(&self.dir)?;
         restrict(&self.dir, 0o700)?;
         let path = self.key_path();
@@ -269,6 +295,23 @@ impl EventStore {
     }
 }
 
+/// The append-only `events.jsonl` [`HistoryStore`]. A multi-user `qw-web`
+/// host substitutes an encrypted-at-rest implementation that decrypts into
+/// memory for the life of a session (NIP-QW12).
+impl HistoryStore for EventStore {
+    fn events(&self) -> &[Event] {
+        EventStore::events(self)
+    }
+
+    fn append(&mut self, events: &[Event]) -> Result<usize, ClientError> {
+        EventStore::append(self, events.iter().cloned())
+    }
+
+    fn rejected(&self) -> usize {
+        EventStore::rejected(self)
+    }
+}
+
 #[cfg(unix)]
 fn restrict(path: &Path, mode: u32) -> io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
@@ -403,6 +446,69 @@ impl MailboxTransport for HttpMailbox {
             507 => Ok(PublishOutcome::MailboxFull),
             other => Err(ClientError::UnexpectedStatus(other)),
         }
+    }
+}
+
+/// [`LedgerTransport`] over HTTP against a peer replica's `/ledger/pull`
+/// and `/ledger/push` (NIP-QW12). A "peer" is another instance of *this*
+/// identity's client — a phone, a personal `qw-web` box — never a
+/// coordination server. `push` returns the count of events the peer took
+/// as new; the rest it already held.
+pub struct HttpLedger {
+    client: reqwest::blocking::Client,
+}
+
+impl Default for HttpLedger {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl HttpLedger {
+    pub fn new() -> Self {
+        Self {
+            client: reqwest::blocking::Client::new(),
+        }
+    }
+}
+
+impl LedgerTransport for HttpLedger {
+    type Error = ClientError;
+
+    fn pull(
+        &mut self,
+        peer: &str,
+        have: &LedgerCoverage,
+    ) -> Result<PullResponse, ClientError> {
+        let url = format!("{}/ledger/pull", peer.trim_end_matches('/'));
+        let response = self
+            .client
+            .post(url)
+            .json(have)
+            .send()
+            .map_err(|e| ClientError::Http(e.to_string()))?;
+        if !response.status().is_success() {
+            return Err(ClientError::UnexpectedStatus(response.status().as_u16()));
+        }
+        response
+            .json::<PullResponse>()
+            .map_err(|e| ClientError::Http(e.to_string()))
+    }
+
+    fn push(&mut self, peer: &str, events: &[Event]) -> Result<usize, ClientError> {
+        let url = format!("{}/ledger/push", peer.trim_end_matches('/'));
+        let response = self
+            .client
+            .post(url)
+            .json(events)
+            .send()
+            .map_err(|e| ClientError::Http(e.to_string()))?;
+        if !response.status().is_success() {
+            return Err(ClientError::UnexpectedStatus(response.status().as_u16()));
+        }
+        response
+            .json::<usize>()
+            .map_err(|e| ClientError::Http(e.to_string()))
     }
 }
 
@@ -622,6 +728,88 @@ mod tests {
         assert_eq!(report.errors.len(), 1);
         assert_eq!(sync.cursor("http://127.0.0.1:1"), None);
     }
+
+    /// A stand-in for a peer replica's `/ledger/pull` + `/ledger/push`,
+    /// answering the NIP-QW12 way. Real socket, like the mailbox stub.
+    fn ledger_stub() -> (SocketAddr, Held) {
+        use qw_node::ledger::{LedgerCoverage, PullResponse};
+
+        let held = Held::default();
+        let state = held.clone();
+        let app = Router::new()
+            .route(
+                "/ledger/pull",
+                post(|State(held): State<Held>, Json(have): Json<LedgerCoverage>| async move {
+                    let store = held.0.lock().unwrap();
+                    let events = store.iter().filter(|e| have.wants(e)).cloned().collect();
+                    Json(PullResponse {
+                        events,
+                        coverage: LedgerCoverage::of(&store),
+                    })
+                }),
+            )
+            .route(
+                "/ledger/push",
+                post(|State(held): State<Held>, Json(evts): Json<Vec<Event>>| async move {
+                    let mut store = held.0.lock().unwrap();
+                    let mut new = 0usize;
+                    for e in evts {
+                        if e.verify().is_ok() && !store.iter().any(|h| h.id == e.id) {
+                            store.push(e);
+                            new += 1;
+                        }
+                    }
+                    Json(new)
+                }),
+            )
+            .with_state(state);
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            rt.block_on(async move {
+                listener.set_nonblocking(true).unwrap();
+                let listener = tokio::net::TcpListener::from_std(listener).unwrap();
+                axum::serve(listener, app).await.unwrap();
+            });
+        });
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        (addr, held)
+    }
+
+    #[test]
+    fn http_ledger_round_trips_a_replica_over_real_http() {
+        use qw_node::ledger::{LedgerCoverage, LedgerTransport};
+
+        let (addr, peer_store) = ledger_stub();
+        let base = format!("http://{addr}");
+        let me = Identity::generate();
+
+        // the peer already holds one of our events
+        let theirs = offer(&me, &Identity::generate().nostr_pubkey_hex(), 100, "on the phone");
+        peer_store.0.lock().unwrap().push(theirs.clone());
+
+        let mut ledger = HttpLedger::new();
+        let ours = offer(&me, &Identity::generate().nostr_pubkey_hex(), 50, "on this box");
+
+        // pull: we lack `theirs`, so it comes back; the peer's coverage
+        // shows it does not yet have `ours`
+        let resp = ledger
+            .pull(&base, &LedgerCoverage::of(std::slice::from_ref(&ours)))
+            .unwrap();
+        assert_eq!(resp.events.len(), 1);
+        assert_eq!(resp.events[0].id, theirs.id);
+        assert!(resp.coverage.wants(&ours));
+
+        // push: hand the peer `ours`; it takes it once, then it is a no-op
+        assert_eq!(ledger.push(&base, std::slice::from_ref(&ours)).unwrap(), 1);
+        assert_eq!(ledger.push(&base, std::slice::from_ref(&ours)).unwrap(), 0);
+        assert!(peer_store.0.lock().unwrap().iter().any(|e| e.id == ours.id));
+    }
 }
 
 #[cfg(test)]
@@ -687,6 +875,7 @@ mod store_tests {
     fn signed(identity: &Identity, tag: &str) -> Event {
         profile_skill_tags(
             &identity.nostr_pubkey_hex(),
+            1,
             &ProfileSkillTags {
                 display_name: None,
                 skill_tags: vec![tag.to_string()],

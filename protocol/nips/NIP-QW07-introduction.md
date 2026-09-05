@@ -101,6 +101,20 @@ default. A publisher who wants those can rotate the link's pubkey or stop
 publishing it; the protocol does not model a revocable invite token,
 because a link that a stranger can use is exactly the point.
 
+## The contract an invitation was for
+
+An invite link is usually published *because* the publisher has an
+upcoming contract in mind — the link is the front door to a specific
+piece of work, not just to the graph. Nothing in kind 9060 carries that
+contract: the link stays a bare pubkey, and the introduction asserts
+reachability and nothing else. But the first `JobOffer` (NIP-QW01) that
+follows the introduction **may** reference the introduction event with an
+`["e", …, "", "introduction"]` tag, so the negotiation record shows it
+grew out of the invite rather than appearing from nowhere. The
+introduction is still the contact edge; the offer is still a separate,
+independently-signed step, and it composes offline from the introduction
+event id alone. See NIP-QW01 §"Provenance".
+
 ## Accepting an introduction
 
 Accepting one — adding `subject_pubkey` as a contact — is a **local

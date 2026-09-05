@@ -70,7 +70,7 @@ mod tests {
             display_name: None,
             skill_tags: vec![],
         };
-        let unsigned = profile_skill_tags(&identity.nostr_pubkey_hex(), &profile);
+        let unsigned = profile_skill_tags(&identity.nostr_pubkey_hex(), 0, &profile);
         UnsignedEvent::with_created_at(
             unsigned.pubkey,
             unsigned.kind,

@@ -1,6 +1,9 @@
 # NIP-QW09: Person record amendment
 
-`draft` — kinds `9080` (recovery policy), `9081` (amendment)
+`draft` — kinds `9080` (recovery policy), `9081` (amendment), `9082`
+(device subkey delegation — record + resolver built 2026-09-05; the
+`identity.rs` hierarchy that produces them, and a live verification path,
+are still open)
 
 ## Abstract
 
@@ -102,3 +105,65 @@ Two properties that matter more than the mechanism itself:
   to compute here; the FAQ's own answer is social ("the legitimate holder
   can raise a competing amendment"), which resolves the same way every
   other trust question in this design does — per viewer, over time.
+
+## Device subkeys — kind 9082
+
+The quorum amendment above is for the **controller** key only. Routine
+multi-device life — a new phone, a self-hosted `qw-web` box — should not
+need the account's trusted contacts to countersign, and `todo-impl.md`
+§2 flags the controller/device split as the intended design that
+`identity.rs` has not yet built. This kind is that split's signed record.
+
+Tags: `["p", <device pubkey>]`, `["account", <account_id>]`.
+
+```json
+{
+  "device_pubkey": "<hex>",
+  "label": "pixel-8 / vlad",
+  "valid_from": 1730000000,
+  "revoked_at": null
+}
+```
+
+Signed by the **current controller** (resolved via
+`latest_valid_controller`), not by a quorum. A delegation record has
+`revoked_at: null`; revoking a device is a second 9082 for the same
+`device_pubkey` with `revoked_at` set. Same two properties as a controller
+amendment: revocation is not retroactive (a device key's signatures
+before `revoked_at` stay valid), and a signature under a revoked device
+key after `revoked_at` is an alert.
+
+Verifying any QW event then becomes: the signature is valid **and** the
+signer was, at the event's `created_at`, either the controller resolved
+from the amendment chain or a device key the controller had delegated and
+not yet revoked.
+
+`qw_protocol::recovery` (built 2026-09-05):
+
+- `controller_at(genesis_pubkey_hex, amendments, at) -> String` — the
+  controller as of `at`, applying only amendments with `effective_at <=
+  at`. `latest_valid_controller` is now `controller_at(.., u64::MAX)`.
+- `device_authority(account_id, amendments, subkey_events, signer, at) ->
+  DeviceAuthority` — `Delegated { label }`, `Revoked { label, revoked_at }`
+  (the alert), or `Unknown`. A kind-9082 event is counted only if its own
+  NIP-01 signature verifies **and** its publisher was the controller as of
+  *its own* `created_at` — a subkey is real only if the controller
+  delegated it. The most recent delegation (`valid_from`) and revocation
+  (`revoked_at`) that are `<= at` are compared, so a re-delegation after a
+  revocation restores authority and a pre-`revoked_at` signature stays
+  `Delegated` (not retroactive).
+
+Still open: nothing yet *produces* 9082 events (`identity.rs` has
+controller == device, 1:1), and no live verification path calls
+`device_authority` — it is a standalone helper, as `verify_amendment` was
+before a resolution path used it.
+
+**Recovery — re-sign forward, keep the old signatures.** A compromised or
+retired device key is revoked with a 9082; work that was mid-flight when
+the revocation landed (a replica's unsent outbox, per NIP-QW12) is
+re-signed under a still-valid key, and the superseded signature is
+retained alongside the new one rather than discarded. Nothing already
+published is rewritten — ids are hashes over content, so a re-sign is a
+new event that references the old, not an edit of it. The exact
+re-attestation envelope shape is still open (NIP-QW12
+§"Two hazards…").

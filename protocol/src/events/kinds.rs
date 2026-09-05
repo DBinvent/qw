@@ -9,7 +9,7 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use super::{e_tag, e_tag_marked, p_tag, t_tag, Tag, UnsignedEvent};
+use super::{e_tag, e_tag_marked, p_tag, revision_tag, t_tag, Tag, UnsignedEvent};
 
 // --- job lifecycle (NIP-QW01) ---
 pub const KIND_JOB_OFFER: u16 = 9000;
@@ -23,7 +23,19 @@ pub const KIND_JOB_REVIEW_REQUEST: u16 = 9005;
 pub const KIND_CREDIT_ISSUANCE: u16 = 9010;
 
 // --- profile / skill tags (NIP-QW03) ---
+/// Legacy: the original profile kind, in NIP-01's regular (never-replaced)
+/// range. Frozen — nothing signs it any more, but readers fall back to the
+/// most recent one when a pubkey has published no [`KIND_PROFILE`] event.
 pub const KIND_PROFILE_SKILL_TAGS: u16 = 9020;
+/// The current profile kind, in Nostr's **replaceable** range
+/// (10000-19999): relays keep only the latest per (pubkey, kind). A
+/// profile is a standing statement of intent, not evidence — unlike the
+/// contract ledger it must not accumulate a permanent public history of
+/// every edit. QW's replaceable kinds mirror the `90xx` block at `100xx`,
+/// so 9020 -> 10020. Carries a `["revision", n]` tag; readers order by
+/// `(revision, created_at, id)` — never `created_at` alone — so a replica
+/// with a fast clock cannot overwrite a newer profile (NIP-QW12).
+pub const KIND_PROFILE: u16 = 10020;
 
 // --- dispute annotation (NIP-QW04) ---
 pub const KIND_DISPUTE_ANNOTATION: u16 = 9030;
@@ -46,6 +58,15 @@ pub const KIND_HISTORY_RESPONSE: u16 = 9071;
 // --- person record amendment (NIP-QW09) ---
 pub const KIND_RECOVERY_POLICY: u16 = 9080;
 pub const KIND_PERSON_RECORD_AMENDMENT: u16 = 9081;
+/// Device subkey delegation / revocation (NIP-QW09 §"Device subkeys").
+/// Controller-signed, **no quorum** — routine multi-device life (a new
+/// phone, a `qw-web` box) should not need the account's trusted contacts.
+/// A delegation carries `revoked_at: null`; revoking a device is a second
+/// 9082 for the same `device_pubkey` with `revoked_at` set. Verifying any
+/// QW event then becomes "signature valid **and** signer was
+/// controller-or-delegated at `created_at`"
+/// (`crate::recovery::device_authority`).
+pub const KIND_DEVICE_SUBKEY: u16 = 9082;
 
 // --- chain-calculation result (NIP-QW10) ---
 pub const KIND_CHAIN_CALCULATION_RESULT: u16 = 9090;
@@ -54,7 +75,10 @@ pub const KIND_CHAIN_CALCULATION_RESULT: u16 = 9090;
 pub const KIND_BULLETIN_LISTING: u16 = 9091;
 
 /// `Hours × Rate × ko × km` per abstract.md — `ko`/`km` may be omitted to
-/// simplify negotiation.
+/// simplify negotiation. For an AI-model party actor, `ko` tracks model
+/// size / context window / agent-config quality and `km` the model's
+/// cognition — prompt adherence, hallucination rate (abstract.md, "When a
+/// party actor is an AI model").
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct JobOffer {
     pub skill_tags: Vec<String>,
@@ -82,6 +106,27 @@ pub fn job_offer(
         tags,
         serde_json::to_string(offer).expect("JobOffer serializes"),
     )
+}
+
+/// The same offer as [`job_offer`], plus a record that this proposal grew
+/// out of one specific NIP-QW07 introduction — the invite that preceded
+/// it. Adds `["e", <introduction event id>, "", "introduction"]`; the
+/// content is byte-for-byte an ordinary offer, so
+/// [`crate::contract::Contract::from_events`] still anchors the contract
+/// on this event's own id, and a client that predates the marker just
+/// ignores the extra tag. Use it for the common invite-link case, where
+/// the link existed *because* of an upcoming contract.
+pub fn job_offer_from_introduction(
+    client_pubkey_hex: &str,
+    worker_pubkey_hex: &str,
+    introduction_event_id_hex: &str,
+    offer: &JobOffer,
+) -> UnsignedEvent {
+    let mut unsigned = job_offer(client_pubkey_hex, worker_pubkey_hex, offer);
+    unsigned
+        .tags
+        .push(e_tag_marked(introduction_event_id_hex, "introduction"));
+    unsigned
 }
 
 /// Neither accepts nor rejects `superseded_event_id_hex` (the offer or
@@ -294,11 +339,21 @@ pub struct ProfileSkillTags {
     pub skill_tags: Vec<String>,
 }
 
-pub fn profile_skill_tags(pubkey_hex: &str, profile: &ProfileSkillTags) -> UnsignedEvent {
-    let tags: Vec<Tag> = profile.skill_tags.iter().map(t_tag).collect();
+/// Build a profile event ([`KIND_PROFILE`], replaceable). `revision` is
+/// author-monotonic: pass `latest_seen_revision + 1`. A reader breaks a
+/// `created_at` tie — and defends against a stale replica's fast clock —
+/// with [`Event::revision`], reading the `["revision", n]` tag this
+/// writes (NIP-QW12, NIP-QW03).
+pub fn profile_skill_tags(
+    pubkey_hex: &str,
+    revision: u64,
+    profile: &ProfileSkillTags,
+) -> UnsignedEvent {
+    let mut tags: Vec<Tag> = vec![revision_tag(revision)];
+    tags.extend(profile.skill_tags.iter().map(t_tag));
     UnsignedEvent::new(
         pubkey_hex,
-        KIND_PROFILE_SKILL_TAGS,
+        KIND_PROFILE,
         tags,
         serde_json::to_string(profile).expect("ProfileSkillTags serializes"),
     )
@@ -704,6 +759,46 @@ pub fn person_record_amendment(
     )
 }
 
+/// One device-key delegation, or — with `revoked_at` set — its
+/// revocation (NIP-QW09 §"Device subkeys"). Unlike a controller
+/// amendment, this is signed by the **current controller** alone (resolve
+/// it with [`crate::recovery::controller_at`]), no quorum. Revocation is
+/// **not** retroactive: a device key's signatures before `revoked_at`
+/// stay valid; one after it is an alert
+/// ([`crate::recovery::device_authority`]).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DeviceSubkey {
+    pub device_pubkey: String,
+    /// A human label for the device — "pixel-8 / vlad", "qw-web home box".
+    pub label: String,
+    /// From when this device key may sign for the account (unix seconds).
+    pub valid_from: u64,
+    /// Set (in a second 9082 for the same `device_pubkey`) to revoke.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revoked_at: Option<u64>,
+}
+
+/// `controller_pubkey_hex` must be the account's current controller — the
+/// signer of the resulting event. `account_id` is the account's genesis
+/// controller pubkey, the permanent anchor. Tags: `["p", device_pubkey]`,
+/// `["account", account_id]`.
+pub fn device_subkey(
+    controller_pubkey_hex: &str,
+    account_id: &str,
+    subkey: &DeviceSubkey,
+) -> UnsignedEvent {
+    let tags = vec![
+        p_tag(subkey.device_pubkey.clone()),
+        vec!["account".to_string(), account_id.to_string()],
+    ];
+    UnsignedEvent::new(
+        controller_pubkey_hex,
+        KIND_DEVICE_SUBKEY,
+        tags,
+        serde_json::to_string(subkey).expect("DeviceSubkey serializes"),
+    )
+}
+
 /// A coordination server's answer to a trust-graph query (§8): "server
 /// must never be the only source of truth for a result it returns" —
 /// `edge_event_ids` are the real `CreditIssuance` ids
@@ -857,6 +952,54 @@ mod tests {
 
         let decoded: JobOffer = serde_json::from_str(&counter_event.content).unwrap();
         assert_eq!(decoded.rate, 55.0);
+    }
+
+    #[test]
+    fn offer_from_introduction_links_the_invite_without_changing_the_content() {
+        let offer = JobOffer {
+            skill_tags: vec!["it/backend/languages#rust".to_string()],
+            hours: 8.0,
+            rate: 40.0,
+            ko: None,
+            km: None,
+            terms: "the work the invite was about".to_string(),
+        };
+        let client = Identity::generate();
+        let worker = Identity::generate();
+
+        let plain = job_offer(
+            &client.nostr_pubkey_hex(),
+            &worker.nostr_pubkey_hex(),
+            &offer,
+        );
+        let linked = job_offer_from_introduction(
+            &client.nostr_pubkey_hex(),
+            &worker.nostr_pubkey_hex(),
+            "introeventid",
+            &offer,
+        );
+
+        // Provenance is a marked `e` tag, never a content field — the
+        // contract anchor logic must see an ordinary offer.
+        assert_eq!(linked.content, plain.content);
+        assert_eq!(linked.kind, KIND_JOB_OFFER);
+        let event = linked.sign(&client);
+        assert!(event.verify().is_ok());
+        assert_eq!(
+            event.first_tag_value("p"),
+            Some(worker.nostr_pubkey_hex().as_str())
+        );
+        let intro_ref = event.tags.iter().find(|t| {
+            t.first().map(String::as_str) == Some("e")
+                && t.get(3).map(String::as_str) == Some("introduction")
+        });
+        assert_eq!(
+            intro_ref.and_then(|t| t.get(1)).map(String::as_str),
+            Some("introeventid")
+        );
+
+        let decoded: JobOffer = serde_json::from_str(&event.content).unwrap();
+        assert_eq!(decoded, offer);
     }
 
     #[test]
@@ -1135,6 +1278,41 @@ mod tests {
     }
 
     #[test]
+    fn device_subkey_delegation_and_revocation_shape() {
+        let controller = Identity::generate();
+        let device = Identity::generate();
+        let account_id = controller.nostr_pubkey_hex();
+
+        let delegation = DeviceSubkey {
+            device_pubkey: device.nostr_pubkey_hex(),
+            label: "pixel-8 / vlad".to_string(),
+            valid_from: 1_730_000_000,
+            revoked_at: None,
+        };
+        let ev = device_subkey(&controller.nostr_pubkey_hex(), &account_id, &delegation)
+            .sign(&controller);
+
+        assert!(ev.verify().is_ok());
+        assert_eq!(ev.kind, KIND_DEVICE_SUBKEY);
+        assert_eq!(ev.first_tag_value("p"), Some(device.nostr_pubkey_hex().as_str()));
+        assert_eq!(ev.first_tag_value("account"), Some(account_id.as_str()));
+        // a delegation omits revoked_at entirely on the wire
+        assert!(!ev.content.contains("revoked_at"));
+        assert_eq!(
+            serde_json::from_str::<DeviceSubkey>(&ev.content).unwrap(),
+            delegation
+        );
+
+        let revocation = DeviceSubkey { revoked_at: Some(1_740_000_000), ..delegation };
+        let rev_ev = device_subkey(&controller.nostr_pubkey_hex(), &account_id, &revocation)
+            .sign(&controller);
+        assert_eq!(
+            serde_json::from_str::<DeviceSubkey>(&rev_ev.content).unwrap().revoked_at,
+            Some(1_740_000_000)
+        );
+    }
+
+    #[test]
     fn chain_calculation_result_addresses_the_requester() {
         let server = Identity::generate();
         let requester = Identity::generate();
@@ -1191,5 +1369,49 @@ mod tests {
 
         let decoded: BulletinListing = serde_json::from_str(&event.content).unwrap();
         assert_eq!(decoded, listing);
+    }
+
+    #[test]
+    fn profile_is_replaceable_and_carries_a_revision() {
+        let me = Identity::generate();
+        let profile = ProfileSkillTags {
+            display_name: Some("vk".to_string()),
+            skill_tags: vec![
+                "it/backend/languages#rust".to_string(),
+                "it/backend/frameworks#axum".to_string(),
+            ],
+        };
+        let event = profile_skill_tags(&me.nostr_pubkey_hex(), 3, &profile).sign(&me);
+
+        assert!(event.verify().is_ok());
+        assert_eq!(event.kind, KIND_PROFILE, "in the replaceable range, not 9020");
+        assert_eq!(event.revision(), 3);
+        assert_eq!(event.first_tag_value("revision"), Some("3"));
+        assert_eq!(event.first_tag_value("p"), None, "a profile is not addressed");
+        let tags: Vec<&str> = event.tag_values("t").collect();
+        assert_eq!(
+            tags,
+            vec!["it/backend/languages#rust", "it/backend/frameworks#axum"]
+        );
+        let decoded: ProfileSkillTags = serde_json::from_str(&event.content).unwrap();
+        assert_eq!(decoded, profile);
+    }
+
+    #[test]
+    fn revision_defaults_to_zero_when_the_tag_is_absent_or_junk() {
+        let me = Identity::generate();
+        // No revision tag at all (a legacy 9020, or any other kind).
+        let bare = UnsignedEvent::new(me.nostr_pubkey_hex(), KIND_PROFILE_SKILL_TAGS, vec![], "{}")
+            .sign(&me);
+        assert_eq!(bare.revision(), 0);
+        // Present but not a number.
+        let junk = UnsignedEvent::new(
+            me.nostr_pubkey_hex(),
+            KIND_PROFILE,
+            vec![vec!["revision".to_string(), "soon".to_string()]],
+            "{}",
+        )
+        .sign(&me);
+        assert_eq!(junk.revision(), 0);
     }
 }

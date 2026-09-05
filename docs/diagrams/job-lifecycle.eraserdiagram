@@ -34,3 +34,5 @@ Client > Worker: 9010 credit issuance\nQuants = Hours x Rate x ko x km
 // ko: objective coefficient (equipment, conditions, hazard).
 // km: subjective motivation/quality coefficient.
 // Both may be null — negotiation is allowed to stay simple.
+// AI-model party actor: ko = model size / context window / agent-config
+// quality; km = model cognition — prompt adherence, hallucination rate.

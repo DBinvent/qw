@@ -1,0 +1,50 @@
+[Unit]
+Description=qw-web (multi-user) — the QW web client host, many accounts, encrypted at rest
+Documentation=https://github.com/DBinvent/qw/blob/main/app/server/multi-user.md
+After=network-online.target postgresql.service
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=exec
+# The service user IS the Postgres role of the same name — plain peer auth
+# over the unix socket, no pg_ident mapping. Created by the deploy script.
+User=qwweb
+Group=qwweb
+WorkingDirectory=/opt/qw-web
+
+# QW_MULTIUSER makes main hand off to multiuser::serve(). Everything
+# deployment-specific — the `db=` connection string marg reads, the listen
+# address, the coordination servers, and the path to the directory key —
+# is in the EnvironmentFile the deploy script writes (this repo is public).
+Environment=QW_MULTIUSER=1
+EnvironmentFile=/etc/qw-web-mu/env
+ExecStart=/opt/qw-web/qw-web
+Restart=on-failure
+RestartSec=3
+
+# Same proven set as register-bo / qw-server on this host, which run the
+# identical sqlx-over-unix-socket stack. ProtectSystem=full leaves /run
+# (the PG socket) and /var reachable; AF_UNIX is for that socket.
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+ReadWritePaths=/opt/qw-web
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

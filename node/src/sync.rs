@@ -113,6 +113,19 @@ impl MailboxSync {
         self.cursors.get(base_url).copied()
     }
 
+    /// Every per-server cursor, sorted by `base_url` — the snapshot a
+    /// client persists so that, restored with [`restore_cursor`] after a
+    /// restart, a cold start re-asks only for the one-second overlap
+    /// instead of the whole mailbox.
+    ///
+    /// [`restore_cursor`]: Self::restore_cursor
+    pub fn cursor_snapshot(&self) -> Vec<(String, u64)> {
+        let mut out: Vec<(String, u64)> =
+            self.cursors.iter().map(|(k, v)| (k.clone(), *v)).collect();
+        out.sort();
+        out
+    }
+
     /// Queue a signed event for delivery. Publishing is separate from
     /// signing so an offline client can compose all it likes and hand the
     /// results over whenever a network appears.
@@ -470,6 +483,27 @@ mod tests {
         sync.queue(event.clone());
         sync.queue(event);
         assert_eq!(sync.pending().len(), 1);
+    }
+
+    #[test]
+    fn cursor_snapshot_round_trips_through_restore_cursor() {
+        let me = Identity::generate();
+        let mut sync = MailboxSync::new(me.nostr_pubkey_hex());
+        sync.restore_cursor("s2", 200);
+        sync.restore_cursor("s1", 100);
+
+        // Sorted by base_url, so the snapshot is stable to serialise.
+        assert_eq!(
+            sync.cursor_snapshot(),
+            vec![("s1".to_string(), 100), ("s2".to_string(), 200)]
+        );
+
+        let mut restored = MailboxSync::new(me.nostr_pubkey_hex());
+        for (url, at) in sync.cursor_snapshot() {
+            restored.restore_cursor(url, at);
+        }
+        assert_eq!(restored.cursor("s1"), Some(100));
+        assert_eq!(restored.cursor("s2"), Some(200));
     }
 
     #[test]

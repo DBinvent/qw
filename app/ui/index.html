@@ -51,6 +51,18 @@
   /* The countersigned one is the only badge that costs someone else a
      signature, so it is the only one that gets the accent. */
   .badge.contract { border-color: #4c1d95; color: #c4b5fd; }
+  /* Profile editor: the published tags as removable chips. Max five, per
+     the taxonomy's own rule. */
+  .chips { display: flex; flex-wrap: wrap; gap: .4rem; margin: .5rem 0 0; padding: 0; list-style: none; }
+  .chip { display: inline-flex; align-items: center; gap: .4rem; font-family: ui-monospace, monospace;
+          font-size: 12px; padding: .35rem .5rem; border: 1px solid #4c1d95; border-radius: 999px;
+          color: #c4b5fd; overflow-wrap: anywhere; }
+  .chip button { margin: 0; min-height: 0; padding: 0 .3rem; background: none; color: #a1a1aa;
+                 font-size: 15px; line-height: 1; border-radius: .3rem; }
+  .chip button:active { background: #27272a; }
+  .row { display: flex; gap: .5rem; }
+  .row input { flex: 1; }
+  .row button { margin-top: 0; flex: 0 0 auto; }
   /* The QR sits on its own white plate whatever the theme is doing: a
      camera needs light modules to be light, and this page is near-black.
      Capped so it never grows past a comfortable phone-screen square, and
@@ -59,12 +71,66 @@
   .qr { display: block; margin: 0 auto; width: 100%; max-width: 15rem;
         background: #fff; border-radius: .5rem; padding: .6rem; box-sizing: border-box; }
   .qr svg { display: block; width: 100%; height: auto; }
+  /* Contract proposals. A counter is a full replacement of the terms, so
+     the compose box is the same one for both — it just changes its label
+     and locks the counterparty when answering an existing thread. */
+  textarea { font: inherit; font-size: 16px; width: 100%; box-sizing: border-box;
+             min-height: 4.5rem; padding: .7rem; background: #09090b; color: inherit;
+             border: 1px solid #27272a; border-radius: .4rem; resize: vertical; }
+  details > summary { cursor: pointer; color: #a78bfa; margin: .5rem 0; }
+  button.ghost { background: #27272a; color: #e4e4e7; }
+  .negs { list-style: none; margin: .25rem 0 0; padding: 0; }
+  .negs li { padding: .7rem 0; border-top: 1px solid #27272a; }
+  .negs li:first-child { border-top: 0; }
+  .neg-line { display: flex; flex-wrap: wrap; gap: .4rem; align-items: baseline; }
+  .neg-party { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px;
+               overflow-wrap: anywhere; margin-right: auto; }
+  .neg-terms { margin: .3rem 0 0; }
+  .neg-actions { display: flex; gap: .5rem; }
+  .neg-actions button { margin-top: .5rem; }
+  /* Account keys (multi-user host only). One row per KEK wrapping the same
+     master; any one signs in. The primary passphrase has no Remove. */
+  .keys { list-style: none; margin: .25rem 0 .75rem; padding: 0; }
+  .keys li { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem;
+             padding: .55rem 0; border-top: 1px solid #27272a; }
+  .keys li:first-child { border-top: 0; }
+  .keys .k-tag { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 13px;
+                 margin-right: auto; overflow-wrap: anywhere; }
+  .keys button { margin: 0; min-height: 0; padding: .3rem .6rem; font-size: 12px; }
+  /* Shown once (recovery code) or on an explicit tap (identity key); never
+     stored server-side. Accent border so it reads as "write this down",
+     selectable so it can be copied by hand. */
+  #recovery-code, #seed-value {
+    font-family: ui-monospace, SFMono-Regular, monospace; font-size: 15px;
+    letter-spacing: .04em; background: #09090b; border: 1px solid #7c3aed;
+    border-radius: .4rem; padding: .8rem; margin: .5rem 0 0;
+    overflow-wrap: anywhere; user-select: all; -webkit-user-select: all; }
 </style>
 </head>
 <body>
   <main>
   <h1>QW</h1>
 
+  <!-- Only ever shown on a multi-user qw-web host, and only when not signed
+       in: the very first backend call comes back 401. The Tauri shell and a
+       single-user server never 401, so this stays hidden there. The
+       passphrase is sent over TLS and unlocks the account's key in server
+       memory for this session only — see server/multi-user.md. -->
+  <section id="auth" hidden>
+    <div class="muted">Sign in to this host, or pick a nickname to register.</div>
+    <p><input id="auth-nick" placeholder="Nickname — at least 8 characters"
+       autocomplete="username" autocapitalize="none" spellcheck="false"></p>
+    <p><input id="auth-secret" type="password" placeholder="Passphrase"
+       autocomplete="current-password"></p>
+    <div class="row">
+      <button id="auth-login">Sign in</button>
+      <button id="auth-register" class="ghost" type="button">Register</button>
+    </div>
+    <p class="muted" id="auth-status"></p>
+  </section>
+  <p class="muted" id="boot-error" hidden></p>
+
+  <div id="app" hidden>
   <section>
     <div class="muted">Your invite link — post it anywhere your work history already lives,
       or let someone scan it.</div>
@@ -89,6 +155,54 @@
   </section>
 
   <section>
+    <div class="muted">Contracts. An invite usually exists <strong>because</strong>
+      of an upcoming one — follow a link above, then propose it here. Each
+      round is a full set of terms: a counter <strong>replaces</strong> them,
+      it does not edit them. Only the worker's signed Accept ends the
+      exchange; walking away is just silence.</div>
+    <ul class="negs" id="negs"></ul>
+    <p class="muted" id="negs-empty">No proposals yet.</p>
+    <details id="propose-box">
+      <summary id="propose-summary">New proposal</summary>
+      <p><input id="neg-party" placeholder="Counterparty npub or hex"
+                autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text"></p>
+      <p class="muted" id="neg-intro-hint" hidden></p>
+      <div class="row">
+        <input id="neg-skill" list="taxonomy" placeholder="Skill — pick or type"
+               autocapitalize="none" autocorrect="off" spellcheck="false">
+        <button id="neg-skill-add" type="button">Add</button>
+      </div>
+      <ul class="chips" id="neg-chips"></ul>
+      <div class="row">
+        <input id="neg-hours" inputmode="decimal" placeholder="Hours">
+        <input id="neg-rate" inputmode="decimal" placeholder="Rate">
+      </div>
+      <p><textarea id="neg-terms" placeholder="What the work is"></textarea></p>
+      <button id="neg-send">Sign proposal</button>
+      <button id="neg-cancel" class="ghost" type="button" hidden>Cancel</button>
+      <p class="muted" id="neg-status"></p>
+    </details>
+  </section>
+
+  <section>
+    <div class="muted">Your profile — the skills a referral query matches
+      you on. Published tags are <strong>public</strong>: that is how relays
+      route a question to you. There is no half-public tag; one you do not
+      publish is simply unreachable.</div>
+    <p><input id="profile-name" placeholder="Display name (optional)"
+              autocapitalize="words" spellcheck="false" maxlength="80"></p>
+    <div class="row">
+      <input id="profile-tag" list="taxonomy" placeholder="Add a skill — pick or type"
+             autocapitalize="none" autocorrect="off" spellcheck="false">
+      <button id="profile-add" type="button">Add</button>
+    </div>
+    <datalist id="taxonomy"></datalist>
+    <ul class="chips" id="profile-chips"></ul>
+    <button id="profile-save">Save &amp; publish</button>
+    <p class="muted" id="profile-status"></p>
+  </section>
+
+  <section>
     <div class="muted">Your skills. Badges are the evidence: a review, or
       contracts a counterparty countersigned.</div>
     <ul class="skills" id="skills"></ul>
@@ -97,17 +211,101 @@
   </section>
 
   <section>
+    <div class="muted">Find someone by skill. The question walks your
+      contacts, then theirs — up to 3 hops — toward whoever has done that
+      kind of work. Your own contacts see you asked; run <strong>Sync</strong>
+      to send it and again to collect what comes back.</div>
+    <div class="row">
+      <input id="find-skill" list="taxonomy" placeholder="Skill — pick or type"
+             autocapitalize="none" autocorrect="off" spellcheck="false">
+      <button id="find-go" type="button">Search</button>
+    </div>
+    <p class="muted" id="find-status"></p>
+    <ul class="skills" id="find-results"></ul>
+  </section>
+
+  <section>
+    <div class="muted">Your network — everyone you have exchanged an
+      introduction with. Badges: the skills routing knows them by
+      (<span class="badge">countersigned</span> beats a plain claim), then
+      <strong>your own</strong> trust read — hops on the shortest verified
+      credit path (or <span class="badge">unknown</span> when none reaches
+      them, which is not the same as zero) and the running balance with
+      them. There is no global score; this is computed here, from records
+      you hold.</div>
+    <p class="muted" id="net-position"></p>
+    <ul class="skills" id="contacts"></ul>
+    <p class="muted" id="contacts-empty">No contacts yet. Follow someone's
+      link above.</p>
+  </section>
+
+  <!-- Multi-user qw-web only: shown once boot() confirms a login host. On
+       the Tauri shell and a single-user server the key is a file on a box
+       you already trust, so there is nothing to manage here. -->
+  <section id="keys-section" hidden>
+    <div class="muted">Keys for this account. Any one of them signs you in —
+      they each wrap the same master key, which never changes. Add a second
+      passphrase for another device, and keep a <strong>recovery code</strong>
+      somewhere offline: forget every other key and it is the only way back.</div>
+    <ul class="keys" id="keys"></ul>
+    <div class="row">
+      <input id="kek-label" placeholder="Label — e.g. laptop" autocapitalize="none"
+             autocorrect="off" spellcheck="false" maxlength="40">
+      <input id="kek-secret" type="password" placeholder="New passphrase — 8+ chars"
+             autocomplete="new-password">
+    </div>
+    <div class="row">
+      <button id="kek-add">Add passphrase</button>
+      <button id="kek-recovery" class="ghost" type="button">Regenerate recovery code</button>
+    </div>
+    <p class="muted" id="keys-status"></p>
+    <p id="recovery-code" hidden></p>
+    <details id="seed-details">
+      <summary>Show identity key</summary>
+      <p class="muted">This 64-character key <strong>is</strong> the account —
+        anyone who has it is you, and there is no reset. Save it the way you
+        would a password-manager export; paste it into another QW client to
+        carry the identity across, even if this host disappears.</p>
+      <button id="seed-reveal" type="button" class="ghost">Reveal</button>
+      <p id="seed-value" hidden></p>
+    </details>
+  </section>
+
+  <section>
     <div class="muted">Mailbox</div>
     <button id="sync">Sync now</button>
+    <button id="signout" class="ghost" type="button" hidden>Sign out</button>
     <p class="muted" id="sync-status">Not synced yet.</p>
   </section>
+  </div>
   </main>
 
 <script type="module">
-// Tauri v2 exposes invoke on window.__TAURI__ when withGlobalTauri is on;
-// this shell keeps the frontend dependency-free rather than pulling an npm
-// package in for one function.
-const invoke = window.__TAURI__.core.invoke;
+// One RPC seam, two backends. In the Tauri shell `window.__TAURI__` is
+// present and `invoke` is its IPC bridge. Served by `qw-web` it is absent,
+// so the same call goes over HTTP to `/api/<cmd>` with the identical
+// argument object as the body — a rejected command is a non-2xx response
+// carrying `{error}`, thrown as the same bare string a Tauri rejection
+// gives. Everything below this line is unaware of which one it is.
+const isWeb = !(window.__TAURI__ && window.__TAURI__.core);
+// The HTTP status of the last `invoke` call — read by boot() to tell a
+// "not signed in" 401 (a multi-user host) from a real failure.
+let lastHttpStatus = 0;
+
+const invoke = isWeb
+  ? async (cmd, args) => {
+      const res = await fetch(`/api/${cmd}`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(args ?? {}),
+      });
+      lastHttpStatus = res.status;
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw (body && body.error) || `${res.status} ${res.statusText}`;
+      return body;
+    }
+  : window.__TAURI__.core.invoke;
 
 // Everything the identity command feeds, in one function so a sync can
 // re-render it. A delivered countersigned completion changes what is
@@ -133,7 +331,9 @@ async function showIdentity() {
   }
 }
 
-await showIdentity();
+// The four initial loads run from boot() at the end of the module, so a
+// 401 (a multi-user host, not signed in) is caught and turns into the
+// sign-in panel instead of failing the whole module.
 
 // navigator.clipboard needs a secure context, which the Android WebView's
 // custom asset protocol is not guaranteed to be. Fall back to the old
@@ -187,6 +387,292 @@ function badge(text, extra) {
   return el;
 }
 
+// --- profile editor ---------------------------------------------------
+// The published tags are just a list of strings the user assembles; the
+// taxonomy resolves anything typed (synonyms and all) inside profile_set,
+// so a bad entry comes back as an error naming it rather than being
+// dropped. Max five, matching the taxonomy's own rule.
+const MAX_TAGS = 5;
+let profileTags = [];
+
+async function fillTaxonomy() {
+  const leaves = await invoke('taxonomy_leaves');
+  const dl = document.getElementById('taxonomy');
+  dl.textContent = '';
+  for (const tag of leaves) {
+    const o = document.createElement('option');
+    o.value = tag;
+    dl.appendChild(o);
+  }
+}
+
+async function showProfile() {
+  const p = await invoke('profile_get');
+  document.getElementById('profile-name').value = p.display_name || '';
+  profileTags = (p.tags || []).slice();
+  renderChips();
+}
+
+function renderChips() {
+  const list = document.getElementById('profile-chips');
+  list.textContent = '';
+  profileTags.forEach((tag, i) => {
+    const li = document.createElement('li');
+    li.className = 'chip';
+    const label = document.createElement('span');
+    label.textContent = tag;
+    const x = document.createElement('button');
+    x.type = 'button';
+    x.textContent = '×';
+    x.setAttribute('aria-label', 'remove ' + tag);
+    x.onclick = () => { profileTags.splice(i, 1); renderChips(); };
+    li.append(label, x);
+    list.appendChild(li);
+  });
+}
+
+document.getElementById('profile-add').onclick = () => {
+  const input = document.getElementById('profile-tag');
+  const v = input.value.trim();
+  const status = document.getElementById('profile-status');
+  if (!v) return;
+  if (profileTags.length >= MAX_TAGS) {
+    status.textContent = `At most ${MAX_TAGS} tags — remove one first.`;
+    return;
+  }
+  if (!profileTags.includes(v)) profileTags.push(v);
+  input.value = '';
+  status.textContent = '';
+  renderChips();
+};
+
+document.getElementById('profile-save').onclick = async () => {
+  const status = document.getElementById('profile-status');
+  status.textContent = 'Signing…';
+  try {
+    await invoke('profile_set', {
+      edit: {
+        display_name: document.getElementById('profile-name').value || null,
+        tags: profileTags,
+      },
+    });
+    status.textContent = 'Signed. Publishing…';
+    await invoke('sync_now');
+    await showProfile();
+    await showIdentity();
+    status.textContent = 'Published.';
+  } catch (e) {
+    status.textContent = String(e);
+  }
+};
+
+// (fillTaxonomy + showProfile run from boot(), see above)
+
+// --- contract proposals & negotiation -------------------------------
+// One compose box does both jobs. For a fresh proposal it takes a
+// counterparty and terms; for a counter it is prefilled with the current
+// head terms, the counterparty is locked, and `counterTarget` holds the
+// offer id the reject-amend-reapply attaches to. `pendingIntro` carries
+// the introduction event id from the last Follow so the first offer to a
+// link-minted contact records where it came from.
+const NEG_MAX_SKILLS = 5;
+let negSkills = [];
+let counterTarget = null;
+let pendingIntro = null;
+
+function short(pk) { return pk.length > 18 ? pk.slice(0, 10) + '…' + pk.slice(-4) : pk; }
+
+async function showNegotiations() {
+  const list = document.getElementById('negs');
+  const empty = document.getElementById('negs-empty');
+  const rows = await invoke('negotiations');
+  list.textContent = '';
+  empty.hidden = rows.length > 0;
+
+  for (const n of rows) {
+    const li = document.createElement('li');
+
+    const line = document.createElement('div');
+    line.className = 'neg-line';
+    const party = document.createElement('span');
+    party.className = 'neg-party';
+    party.textContent = short(n.counterparty_pubkey);
+    const role = document.createElement('span');
+    role.className = 'badge';
+    role.textContent = n.am_client ? 'you proposed' : 'proposed to you';
+    const st = document.createElement('span');
+    st.className = 'badge' + (n.state === 'accepted' ? ' contract' : '');
+    st.textContent = n.your_move ? 'your move' : n.state;
+    line.append(party, role, st);
+    // Your own trust read on the counterparty — pub_window liveness plus
+    // §5 credit-path standing, so a proposal is not judged on terms alone.
+    try {
+      const tr = await invoke('trust', { pubkey: n.counterparty_pubkey });
+      trustBadge(line, tr);
+    } catch { /* offline / not signed in */ }
+    li.appendChild(line);
+
+    const t = n.head_terms;
+    const terms = document.createElement('p');
+    terms.className = 'neg-terms muted';
+    const money = `${t.hours}h × ${t.rate}` + (t.ko ? ` × ko ${t.ko}` : '') + (t.km ? ` × km ${t.km}` : '');
+    terms.textContent = `${t.skill_tags.join(', ')} · ${money}` +
+      (n.rounds ? ` · round ${n.rounds}` : '') + ` — ${t.terms}`;
+    li.appendChild(terms);
+
+    if (n.can_counter || n.can_accept) {
+      const actions = document.createElement('div');
+      actions.className = 'neg-actions';
+      if (n.can_counter) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'ghost';
+        b.textContent = 'Counter';
+        b.onclick = () => openCounter(n);
+        actions.appendChild(b);
+      }
+      if (n.can_accept) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.textContent = 'Accept';
+        b.onclick = () => acceptOffer(n.offer_event_id);
+        actions.appendChild(b);
+      }
+      li.appendChild(actions);
+    }
+    list.appendChild(li);
+  }
+}
+
+function renderNegChips() {
+  const box = document.getElementById('neg-chips');
+  box.textContent = '';
+  negSkills.forEach((tag, i) => {
+    const li = document.createElement('li');
+    li.className = 'chip';
+    const label = document.createElement('span');
+    label.textContent = tag;
+    const x = document.createElement('button');
+    x.type = 'button';
+    x.textContent = '×';
+    x.setAttribute('aria-label', 'remove ' + tag);
+    x.onclick = () => { negSkills.splice(i, 1); renderNegChips(); };
+    li.append(label, x);
+    box.appendChild(li);
+  });
+}
+
+function resetProposeBox() {
+  counterTarget = null;
+  negSkills = [];
+  renderNegChips();
+  for (const id of ['neg-party', 'neg-skill', 'neg-hours', 'neg-rate', 'neg-terms']) {
+    document.getElementById(id).value = '';
+  }
+  const party = document.getElementById('neg-party');
+  party.disabled = false;
+  document.getElementById('neg-intro-hint').hidden = true;
+  document.getElementById('neg-cancel').hidden = true;
+  document.getElementById('propose-summary').textContent = 'New proposal';
+  document.getElementById('neg-send').textContent = 'Sign proposal';
+  document.getElementById('neg-status').textContent = '';
+}
+
+function startProposalFromIntro(r) {
+  resetProposeBox();
+  pendingIntro = { pubkey: r.contact_pubkey, npub: r.contact_npub, eventId: r.event_id };
+  const party = document.getElementById('neg-party');
+  party.value = r.contact_npub;
+  const hint = document.getElementById('neg-intro-hint');
+  hint.textContent = 'This offer will point back at the invite you just followed.';
+  hint.hidden = false;
+  document.getElementById('propose-box').open = true;
+  document.getElementById('neg-terms').focus();
+}
+
+function openCounter(n) {
+  resetProposeBox();
+  counterTarget = n.offer_event_id;
+  negSkills = n.head_terms.skill_tags.slice();
+  renderNegChips();
+  const party = document.getElementById('neg-party');
+  party.value = short(n.counterparty_pubkey);
+  party.disabled = true;
+  document.getElementById('neg-hours').value = n.head_terms.hours;
+  document.getElementById('neg-rate').value = n.head_terms.rate;
+  document.getElementById('neg-terms').value = n.head_terms.terms;
+  document.getElementById('propose-summary').textContent = 'Counter — replaces the current terms';
+  document.getElementById('neg-send').textContent = 'Sign counter';
+  document.getElementById('neg-cancel').hidden = false;
+  document.getElementById('propose-box').open = true;
+}
+
+document.getElementById('neg-skill-add').onclick = () => {
+  const input = document.getElementById('neg-skill');
+  const status = document.getElementById('neg-status');
+  const v = input.value.trim();
+  if (!v) return;
+  if (negSkills.length >= NEG_MAX_SKILLS) {
+    status.textContent = `At most ${NEG_MAX_SKILLS} skills on one proposal.`;
+    return;
+  }
+  if (!negSkills.includes(v)) negSkills.push(v);
+  input.value = '';
+  status.textContent = '';
+  renderNegChips();
+};
+
+document.getElementById('neg-cancel').onclick = () => resetProposeBox();
+
+document.getElementById('neg-send').onclick = async () => {
+  const status = document.getElementById('neg-status');
+  const terms = {
+    skill_tags: negSkills,
+    hours: parseFloat(document.getElementById('neg-hours').value),
+    rate: parseFloat(document.getElementById('neg-rate').value),
+    ko: null,
+    km: null,
+    terms: document.getElementById('neg-terms').value,
+  };
+  if (!Number.isFinite(terms.hours) || !Number.isFinite(terms.rate)) {
+    status.textContent = 'Hours and rate must be numbers.';
+    return;
+  }
+  status.textContent = 'Signing…';
+  try {
+    if (counterTarget) {
+      await invoke('counter', { args: { offer_event_id: counterTarget, terms } });
+    } else {
+      const party = document.getElementById('neg-party').value.trim();
+      const fromIntro = pendingIntro && (party === pendingIntro.npub || party === pendingIntro.pubkey)
+        ? pendingIntro.eventId
+        : null;
+      await invoke('propose', { args: { counterparty: party, from_introduction: fromIntro, terms } });
+    }
+    status.textContent = 'Signed. Publishing…';
+    await invoke('sync_now');
+    resetProposeBox();
+    document.getElementById('propose-box').open = false;
+    await showNegotiations();
+  } catch (e) {
+    status.textContent = String(e);
+  }
+};
+
+async function acceptOffer(offerId) {
+  try {
+    await invoke('accept_contract', { args: { offer_event_id: offerId, note: null } });
+    await invoke('sync_now');
+    await showNegotiations();
+    await showIdentity();
+  } catch (e) {
+    document.getElementById('negs-empty').textContent = String(e);
+    document.getElementById('negs-empty').hidden = false;
+  }
+}
+
+// (showNegotiations runs from boot(), see above)
+
 async function copyText(text) {
   try {
     if (navigator.clipboard && window.isSecureContext) {
@@ -219,8 +705,14 @@ document.getElementById('copy').onclick = async () => {
 document.getElementById('follow').onclick = async () => {
   const status = document.getElementById('follow-status');
   try {
-    await invoke('follow', { link: document.getElementById('follow-input').value });
+    const r = await invoke('follow', { link: document.getElementById('follow-input').value });
     status.textContent = 'Queued. It goes out on the next sync.';
+    await showContacts();
+    // An invite almost always exists because of an upcoming contract, so
+    // drop straight into the proposal box aimed at them — the offer will
+    // point back at this introduction (from_introduction) as long as the
+    // counterparty field still holds the key we just filled in.
+    startProposalFromIntro(r);
   } catch (e) {
     status.textContent = String(e);
   }
@@ -242,10 +734,299 @@ document.getElementById('sync').onclick = async () => {
     // A sync can deliver a countersigned completion, which changes what is
     // earned — so re-read it rather than leaving a stale list on screen.
     await showIdentity();
+    // It can also deliver a counteroffer or an Accept — the same reason.
+    await showNegotiations();
+    // …and referral traffic: a new contact, or an answer to an open query.
+    await showContacts();
+    await refreshFindResults();
   } catch (e) {
     status.textContent = String(e);
   }
 };
+
+// --- referral: find someone by skill, and your contact list --------
+
+let lastQueryId = null;
+
+// Per-viewer trust, from verified credit only. `null` hops means
+// "unknown — no evidence reaches them", never zero.
+function trustBadge(li, p) {
+  if (p.trust_hops === undefined) return;
+  if (p.trust_hops === null) {
+    li.appendChild(badge('unknown', ''));
+  } else {
+    const score = p.trust_score != null ? ` · score ${p.trust_score.toFixed(1)}` : '';
+    li.appendChild(badge(`${p.trust_hops} hop${p.trust_hops === 1 ? '' : 's'}${score}`, 'contract'));
+  }
+  if (p.net_position) {
+    li.appendChild(badge(`net ${p.net_position > 0 ? '+' : ''}${p.net_position.toFixed(1)}`, ''));
+  }
+}
+
+function renderPeople(el, people, extra) {
+  el.textContent = '';
+  for (const p of people) {
+    const li = document.createElement('li');
+    const who = document.createElement('span');
+    who.className = 'skill-tag';
+    who.textContent = short(p.npub || p.responder_npub || p.pubkey || p.responder_pubkey);
+    li.appendChild(who);
+    for (const t of p.declared_skill_tags || []) li.appendChild(badge(t, ''));
+    for (const t of p.earned_skill_tags || []) li.appendChild(badge(t, 'contract'));
+    if (p.matched_skill_tag) {
+      li.appendChild(badge(p.matched_skill_tag + ' · ' + p.hops + (p.hops === 1 ? ' hop' : ' hops'), 'contract'));
+    }
+    trustBadge(li, p);
+    if (extra) extra(li, p);
+    el.appendChild(li);
+  }
+}
+
+async function showContacts() {
+  try {
+    const cs = await invoke('contacts');
+    document.getElementById('contacts-empty').hidden = cs.length > 0;
+    renderPeople(document.getElementById('contacts'), cs);
+    const np = await invoke('net_position');
+    document.getElementById('net-position').textContent =
+      np ? `Your net position across everyone: ${np > 0 ? '+' : ''}${np.toFixed(1)} Quants.` : '';
+  } catch { /* not signed in yet */ }
+}
+
+async function refreshFindResults() {
+  if (!lastQueryId) return;
+  try {
+    const rs = await invoke('referral_results', { qid: lastQueryId });
+    renderPeople(document.getElementById('find-results'), rs);
+    const status = document.getElementById('find-status');
+    if (rs.length) status.textContent = `${rs.length} responder${rs.length === 1 ? '' : 's'} so far.`;
+  } catch (e) {
+    document.getElementById('find-status').textContent = String(e);
+  }
+}
+
+document.getElementById('find-go').onclick = async () => {
+  const status = document.getElementById('find-status');
+  const skill = document.getElementById('find-skill').value.trim();
+  if (!skill) return;
+  document.getElementById('find-results').textContent = '';
+  status.textContent = 'Asking your network…';
+  try {
+    const r = await invoke('find_by_skill', { skill });
+    lastQueryId = r.query_id;
+    status.textContent =
+      (r.own_match ? 'You match this yourself. ' : '') +
+      (r.forwarded
+        ? `Sent to ${r.forwarded} contact${r.forwarded === 1 ? '' : 's'} — Sync to deliver it, then Sync again for answers.`
+        : 'No tag-similar contact to forward to yet.');
+  } catch (e) {
+    status.textContent = String(e);
+  }
+};
+
+// --- keys & recovery (multi-user qw-web only) ----------------------
+// The master key never moves; each row here is one KEK sealing a copy of
+// it. `kek_list` is metadata only — no key material crosses the wire.
+async function showKeys() {
+  let keys;
+  try {
+    keys = await invoke('kek_list');
+  } catch {
+    return; // not a multi-user host, or not signed in — nothing to show
+  }
+  const list = document.getElementById('keys');
+  list.textContent = '';
+  for (const k of keys) {
+    const li = document.createElement('li');
+    const tag = document.createElement('span');
+    tag.className = 'k-tag';
+    tag.textContent = k.stale ? `${k.tag} · replace soon` : k.tag;
+    li.appendChild(tag);
+
+    const when = document.createElement('span');
+    when.className = 'badge';
+    when.textContent = new Date(k.created_at * 1000).toISOString().slice(0, 10);
+    li.appendChild(when);
+
+    // The primary passphrase has no Remove — change it with "Add" then
+    // sign in on the new one, or it is dropped from under you.
+    if (k.tag !== 'passphrase') {
+      const rm = document.createElement('button');
+      rm.type = 'button';
+      rm.className = 'ghost';
+      rm.textContent = 'Remove';
+      rm.onclick = () => removeKey(k.tag);
+      li.appendChild(rm);
+    }
+    list.appendChild(li);
+  }
+  document.getElementById('keys-section').hidden = false;
+}
+
+async function removeKey(tag) {
+  const status = document.getElementById('keys-status');
+  try {
+    await invoke('kek_drop', { tag });
+    status.textContent = `Removed “${tag}”.`;
+    await showKeys();
+  } catch (e) {
+    status.textContent = String(e);
+  }
+}
+
+document.getElementById('kek-add').onclick = async () => {
+  const status = document.getElementById('keys-status');
+  const tag = document.getElementById('kek-label').value.trim();
+  const secret = document.getElementById('kek-secret').value;
+  if (!tag || !secret) {
+    status.textContent = 'A label and a passphrase are both required.';
+    return;
+  }
+  status.textContent = 'Wrapping…';
+  try {
+    await invoke('kek_add', { tag, secret });
+    document.getElementById('kek-label').value = '';
+    document.getElementById('kek-secret').value = '';
+    status.textContent = 'Added — it signs you in exactly like the first one.';
+    await showKeys();
+  } catch (e) {
+    status.textContent = String(e);
+  }
+};
+
+// Reused by registration (first code) and the Regenerate button. Puts the
+// code in the accent box and pulls the section into view — it is shown
+// once and never comes back from the server.
+function revealRecoveryCode(code, message) {
+  const box = document.getElementById('recovery-code');
+  box.textContent = code;
+  box.hidden = false;
+  document.getElementById('keys-status').textContent = message;
+  document.getElementById('keys-section').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+document.getElementById('kek-recovery').onclick = async () => {
+  document.getElementById('keys-status').textContent = 'Generating…';
+  try {
+    const r = await invoke('kek_recovery');
+    revealRecoveryCode(
+      r.code,
+      'Write this down now. It is shown once, never stored, and replaces any earlier recovery code.',
+    );
+    await showKeys();
+  } catch (e) {
+    document.getElementById('keys-status').textContent = String(e);
+  }
+};
+
+document.getElementById('seed-reveal').onclick = async () => {
+  const status = document.getElementById('keys-status');
+  const box = document.getElementById('seed-value');
+  try {
+    const r = await invoke('seed_export');
+    box.textContent = r.secret_hex;
+    box.hidden = false;
+    status.textContent =
+      'Handle this like a private key. It is the whole account and cannot be reset if lost.';
+  } catch (e) {
+    status.textContent = String(e);
+  }
+};
+
+// --- sign in / register (multi-user qw-web only) --------------------
+//
+// A multi-user host answers the first `/api/*` call with 401 until a
+// session cookie is set. register/login set it; the same UI then runs
+// unchanged. The passphrase is posted over TLS, never stored here.
+
+let multiUser = false;
+
+async function authFetch(path, body) {
+  const res = await fetch(path, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body ?? {}),
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) throw (data && data.error) || `${res.status} ${res.statusText}`;
+  return data;
+}
+
+async function boot() {
+  // One probe up front: is this a login host, and are we already on a
+  // valid cookie? It makes `multiUser` reliable even on a plain reload,
+  // where nothing 401s. A host too old to answer leaves it to the 401
+  // path below.
+  if (isWeb) {
+    try {
+      const s = await fetch('/session', { credentials: 'same-origin' }).then((r) => r.json());
+      multiUser = !!s.multi_user;
+    } catch { /* fall back to the 401 path */ }
+  }
+  try {
+    await showIdentity();
+    await fillTaxonomy();
+    await showProfile();
+    await showNegotiations();
+    await showContacts();
+    if (multiUser) await showKeys();
+    document.getElementById('auth').hidden = true;
+    document.getElementById('app').hidden = false;
+    document.getElementById('signout').hidden = !multiUser;
+  } catch (e) {
+    if (isWeb && lastHttpStatus === 401) {
+      multiUser = true;
+      document.getElementById('app').hidden = true;
+      document.getElementById('auth').hidden = false;
+    } else {
+      const b = document.getElementById('boot-error');
+      b.textContent = 'Could not load: ' + String(e);
+      b.hidden = false;
+    }
+  }
+}
+
+async function doAuth(path) {
+  const status = document.getElementById('auth-status');
+  const nick = document.getElementById('auth-nick').value.trim();
+  const secret = document.getElementById('auth-secret').value;
+  if (!nick || !secret) {
+    status.textContent = 'Nickname and passphrase are both required.';
+    return;
+  }
+  status.textContent = 'Working…';
+  try {
+    const data = await authFetch(path, { nick, secret });
+    document.getElementById('auth-secret').value = '';
+    status.textContent = '';
+    await boot();
+    // Registration mints a recovery code and returns it once — surface it
+    // straight away, in the Keys section boot() has just rendered.
+    if (data && data.recovery_code) {
+      revealRecoveryCode(
+        data.recovery_code,
+        'This is your recovery code — the way back if you forget your passphrase. ' +
+          'Write it down now; it is shown once and never stored.',
+      );
+    }
+  } catch (e) {
+    status.textContent = String(e);
+  }
+}
+
+document.getElementById('auth-login').onclick = () => doAuth('/auth/login');
+document.getElementById('auth-register').onclick = () => doAuth('/auth/register');
+document.getElementById('auth-secret').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') doAuth('/auth/login');
+});
+
+document.getElementById('signout').onclick = async () => {
+  try { await authFetch('/auth/logout'); } catch { /* reload regardless */ }
+  location.reload();
+};
+
+await boot();
 </script>
 </body>
 </html>

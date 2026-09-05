@@ -1,0 +1,48 @@
+[package]
+name = "qw-web"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "QW single-user web client: the same qw_client_core Session as the mobile app, served over HTTP for a personal host"
+
+[[bin]]
+name = "qw-web"
+path = "src/main.rs"
+
+[dependencies]
+qw-client-core = { path = "../core" }
+# For the multi-user encrypted store: it implements `qw_client_core`'s
+# `HistoryStore` (whose signature names `qw_protocol::events::Event`) and
+# holds a `qw_protocol::identity::Identity`. Same path dep as core uses.
+qw-protocol = { path = "../../protocol" }
+# Matches the axum already resolved by qw-client-core's dev-deps, so the
+# workspace stays on one axum major.
+axum = "0.7"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Multi-user account envelope (src/envelope.rs, see server/multi-user.md).
+# One master key per account, wrapped by a set of KEKs; the simple start
+# has one KEK kind — a user secret through Argon2id.
+argon2 = "0.5"
+chacha20poly1305 = "0.10"
+blake2 = "0.10"                              # keyed-hash nickname blind index
+hex = "0.4"
+rand = "0.8"
+uuid = { version = "1", features = ["v4"] }
+zeroize = { version = "1", features = ["derive"] }
+unicode-normalization = "0.1"               # NFC the nickname before hashing
+
+# Multi-user account records live in Postgres (src/accounts.rs), on the
+# same stack as the sibling services (register-bo / dashta): marg reads the
+# connection string from args/env/file, schema_guard_tokio applies
+# accounts.schema.yaml at startup, sqlx runs the queries.
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres", "uuid", "json"] }
+marg = "0.3"
+schema_guard_tokio = "1.10"
+async-trait = "0.1"
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+tempfile = "3"

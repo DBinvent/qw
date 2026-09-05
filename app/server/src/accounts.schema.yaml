@@ -1,0 +1,61 @@
+# schema_guard schema for qw-web's multi-user account store
+# (server/multi-user.md, directory tier). One row per account; a dump of
+# this table reveals only "N accounts exist" — the nickname is a keyed hash
+# plus a ciphertext, everything identifying is inside blob under a master
+# key that is never at rest in the clear.
+#
+# Applied at startup by accounts::migrate(), safe on every boot —
+# schema_guard diffs against what is already there. Keep description: lines
+# apostrophe-free: schema_guard renders them into COMMENT ON without
+# escaping quotes.
+database:
+  - schema:
+    schemaName: public
+    tables:
+
+      - table:
+          tableName: accounts
+          description: One multi-user qw-web account. Everything identifying is inside blob, sealed under a per-account master key held only in a live session.
+          columns:
+            - column:
+                name: account_id
+                type: uuid
+                constraint:
+                  primaryKey: true
+                  nullable: false
+                description: Random UUID, the stable key. A nickname can be reused after a merge and a pubkey lives inside blob, so neither can be the key.
+            - column:
+                name: nick_index
+                type: bytea
+                constraint:
+                  nullable: false
+                sql: 'UNIQUE'
+                description: Keyed BLAKE2b-256 of the normalised nickname under server_key. UNIQUE while the instance is closed; drop this constraint after a server merge and by_blind_index fan-out (LIMIT 5 plus trial-decrypt) takes over.
+            - column:
+                name: nick_cipher
+                type: bytea
+                constraint:
+                  nullable: false
+                description: The nickname as XChaCha20-Poly1305 under server_key, AAD-bound to account_id so a cipher cannot be lifted onto another row.
+            - column:
+                name: wrappings
+                type: jsonb
+                constraint:
+                  nullable: false
+                description: The KEK set - a list of dated Wrapping rows, each one KEKs sealed copy of the same account master key.
+            - column:
+                name: blob
+                type: bytea
+                constraint:
+                  nullable: false
+                description: The account payload (identity key plus the event log) sealed under the master key.
+            - column:
+                name: created_at
+                type: bigint
+                constraint:
+                  nullable: false
+            - column:
+                name: updated_at
+                type: bigint
+                constraint:
+                  nullable: false

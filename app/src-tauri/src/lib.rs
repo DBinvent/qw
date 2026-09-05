@@ -1,192 +1,183 @@
 //! The QW client shell: a window over `qw_client_core`.
 //!
-//! Everything here is deliberately thin — parse an argument, call the
-//! core, hand back JSON. Nothing in this file knows how to sign, verify,
-//! or decide anything, because none of that can be tested on a machine
-//! that cannot compile Tauri (webkit2gtk et al). The logic lives one
-//! directory over in `app/core`, which builds and tests anywhere, and is
-//! where every rule worth arguing about is pinned by a test.
+//! Every command is the same three lines — lock the one [`Session`], call
+//! the matching `qw_client_core` operation, stringify the error. No
+//! behaviour lives here: it cannot be tested on a machine that cannot
+//! compile Tauri (webkit2gtk et al), so all of it lives one directory over
+//! in `app/core`, which builds and tests anywhere, and a `qw-web` HTTP
+//! handler is the same shim over the same `Session` (`todo-impl.md` §7).
 //!
-//! **Compiles, never run.** `cargo build` and `cargo clippy` are clean here
-//! since webkit2gtk and `tauri-cli` were installed (2026-08-25), but running
-//! it needs a display and nothing in this file has a test. On Android it is
-//! `run()` that the generated activity calls, via the `mobile_entry_point`
-//! attribute at the bottom — see `app/README.md` for that toolchain.
+//! **Compiles, never run.** `cargo build`/`cargo clippy` are clean here
+//! since webkit2gtk and `tauri-cli` were installed (2026-08-25), but
+//! running it needs a display. On Android it is `run()` the generated
+//! activity calls, via `mobile_entry_point` at the bottom.
 
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 
-use qw_client_core::{follow_invite, invite_qr_svg, EventStore, HttpMailbox, Vault};
-use qw_node::sync::MailboxSync;
-use qw_protocol::identity::Identity;
-use qw_protocol::invite;
-use qw_protocol::trust::earned_skills;
-use serde::Serialize;
+use qw_client_core::negotiation::{AcceptArgs, CounterArgs, NegotiationView, ProposeArgs};
+use qw_client_core::profile::{ProfileEdit, ProfileView};
+use qw_client_core::session::{
+    ContactView, FinalAnswerView, FollowResult, IdentityView, ReferralView, SyncView, TrustView,
+};
+use qw_client_core::{taxonomy, EventStore, HttpMailbox, ServerCandidate, Session, Vault};
 use tauri::{Manager, State};
 
 pub struct AppState {
-    identity: Identity,
-    sync: Mutex<MailboxSync>,
-    /// Coordination servers this client will talk to, best first. Plural
-    /// from the first line of code on purpose: §8 forbids hard-coding one
-    /// server as authoritative, and `qw_node::server_registry::rank_servers`
-    /// is what should eventually order this list by the node's own trust
-    /// view rather than by config order.
-    servers: Vec<String>,
-    /// Everything this client has been handed, on disk. Before it existed
-    /// `sync_now` counted what arrived and dropped it, which quietly meant
-    /// no trust path, no contract list and no earned skill could ever be
-    /// computed — all three are functions over held history.
-    store: Mutex<EventStore>,
+    session: Mutex<Session>,
 }
 
-#[derive(Serialize)]
-pub struct IdentityView {
-    pubkey: String,
-    npub: String,
-    invite_link: String,
-    /// One row per skill, whatever the evidence for it. Not three lists —
-    /// a skill is the row and the evidence is decoration on it, because
-    /// "reviewed" and "contract-approved" are independent of each other and
-    /// of whether you declared the tag. Splitting them would make a phone
-    /// screen ask the reader to join three tables by eye.
-    skills: Vec<SkillView>,
-    /// The same link as a QR code, an SVG document ready to inject. Sent
-    /// with the identity rather than fetched separately: the UI has no
-    /// bundler and so no QR library of its own, and the link never changes
-    /// for the life of the identity, so there is nothing to refresh.
-    invite_qr: String,
-}
-
-/// A skill and its badges. Both badge fields are `None` when that kind of
-/// evidence does not exist, which is the normal case for most skills.
-#[derive(Serialize)]
-pub struct SkillView {
-    tag: String,
-    /// Declared by the holder in their profile. Every skill they published
-    /// is `true`; a skill that only shows up in contract history is not.
-    declared: bool,
-    /// Badge one: a broker's review. Unpopulated — reviewed skills are
-    /// specced (`todo-impl.md` §2) and unbuilt, and the field exists so the
-    /// UI that renders badges does not have to change shape when they land.
-    reviewed: Option<String>,
-    /// Badge two: countersigned contracts carrying this tag, and the mean
-    /// rating counterparties gave. `rating` stays `None` when nobody
-    /// recorded one — absent is not zero.
-    contracts: usize,
-    rating: Option<f64>,
-}
-
-#[derive(Serialize)]
-pub struct SyncView {
-    delivered: usize,
-    rejected: usize,
-    /// Records now held on disk after this pass — the running total, not
-    /// the delta. This is what every later computation actually reads.
-    held: usize,
-    published: usize,
-    still_queued: usize,
-    errors: Vec<String>,
+fn session<'a>(state: &'a State<'_, AppState>) -> Result<MutexGuard<'a, Session>, String> {
+    state.session.lock().map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 fn identity(state: State<'_, AppState>) -> Result<IdentityView, String> {
-    let pubkey = state.identity.nostr_pubkey_hex();
-    let npub = invite::npub_encode(&pubkey).map_err(|e| e.to_string())?;
-    let invite_link =
-        invite::invite_url("https://knownby.work", &pubkey).map_err(|e| e.to_string())?;
-    let invite_qr = invite_qr_svg(&invite_link).map_err(|e| e.to_string())?;
-    let store = state.store.lock().map_err(|e| e.to_string())?;
-    // Earned rows only, for now: there is no profile editor, so nothing is
-    // declared, and no reviews exist to merge in. Both are `false`/`None`
-    // rather than absent so the shape does not change when they arrive.
-    let skills = earned_skills(store.events(), &pubkey)
-        .into_iter()
-        .map(|s| SkillView {
-            tag: s.tag,
-            declared: false,
-            reviewed: None,
-            contracts: s.contracts,
-            rating: s.rating,
-        })
-        .collect();
-    Ok(IdentityView {
-        pubkey,
-        npub,
-        invite_link,
-        skills,
-        invite_qr,
-    })
+    session(&state)?.identity_view().map_err(|e| e.to_string())
 }
 
-/// Follow someone's invite link: sign our half of the introduction and
-/// queue it. The publisher's half is theirs to sign — a client that
-/// produced both sides would be forging half the edge.
+/// Follow an invite link. Returns the queued intro's id plus the contact
+/// it connects to, so the UI can open a contract proposal aimed at them.
 #[tauri::command]
-fn follow(link: String, state: State<'_, AppState>) -> Result<String, String> {
-    let event = follow_invite(&state.identity, &link).map_err(|e| e.to_string())?;
-    let id = event.id.clone();
-    state.sync.lock().map_err(|e| e.to_string())?.queue(event);
-    Ok(id)
+fn follow(link: String, state: State<'_, AppState>) -> Result<FollowResult, String> {
+    session(&state)?.follow(&link).map_err(|e| e.to_string())
 }
 
-/// One sync pass: send what is queued, then collect what arrived. Send
-/// first so a reply this client just wrote is on its way before it blocks
-/// on downloading anything.
+/// One sync pass: flush the outbox, poll for mail, persist what arrived.
 #[tauri::command]
 fn sync_now(state: State<'_, AppState>) -> Result<SyncView, String> {
-    let mut transport = HttpMailbox::new();
-    let servers: Vec<&str> = state.servers.iter().map(String::as_str).collect();
-    let mut sync = state.sync.lock().map_err(|e| e.to_string())?;
+    session(&state)?
+        .sync_now(&mut HttpMailbox::new())
+        .map_err(|e| e.to_string())
+}
 
-    let flushed = sync.flush(&mut transport, &servers);
-    let polled = sync.poll(&mut transport, &servers);
+/// The full taxonomy leaf list for the editor's picker — static for the
+/// life of the build.
+#[tauri::command]
+fn taxonomy_leaves() -> Vec<String> {
+    taxonomy::leaves().to_vec()
+}
 
-    // Persist before reporting. A count of delivered events that no longer
-    // exist anywhere is the bug this replaced.
-    let mut store = state.store.lock().map_err(|e| e.to_string())?;
-    store
-        .append(polled.delivered.iter().cloned())
-        .map_err(|e| e.to_string())?;
+#[tauri::command]
+fn profile_get(state: State<'_, AppState>) -> Result<ProfileView, String> {
+    Ok(session(&state)?.profile_view())
+}
 
-    let mut errors: Vec<String> = flushed
-        .errors
-        .iter()
-        .chain(polled.errors.iter())
-        .map(|(server, message)| format!("{server}: {message}"))
-        .collect();
-    errors.dedup();
+/// Resolve, sign and queue a new replaceable profile event (kind 10020,
+/// `revision` bumped). `sync_now` publishes it.
+#[tauri::command]
+fn profile_set(edit: ProfileEdit, state: State<'_, AppState>) -> Result<String, String> {
+    session(&state)?.set_profile(edit).map_err(|e| e.to_string())
+}
 
-    Ok(SyncView {
-        delivered: polled.delivered.len(),
-        held: store.len(),
-        rejected: polled.rejected,
-        published: flushed.published,
-        still_queued: flushed.still_queued,
-        errors,
-    })
+#[tauri::command]
+fn negotiations(state: State<'_, AppState>) -> Result<Vec<NegotiationView>, String> {
+    Ok(session(&state)?.negotiations())
+}
+
+/// Sign and queue a fresh proposal (kind 9000). Returns the offer id.
+#[tauri::command]
+fn propose(args: ProposeArgs, state: State<'_, AppState>) -> Result<String, String> {
+    session(&state)?.propose(args).map_err(|e| e.to_string())
+}
+
+/// Reject-amend-reapply in one event: supersede the head terms (kind 9004).
+#[tauri::command]
+fn counter(args: CounterArgs, state: State<'_, AppState>) -> Result<String, String> {
+    session(&state)?.counter(args).map_err(|e| e.to_string())
+}
+
+/// The worker's Accept against the current head (kind 9001).
+#[tauri::command]
+fn accept_contract(args: AcceptArgs, state: State<'_, AppState>) -> Result<String, String> {
+    session(&state)?.accept(args).map_err(|e| e.to_string())
+}
+
+/// This identity's hop-1 contacts and the skill tags routing knows them by.
+#[tauri::command]
+fn contacts(state: State<'_, AppState>) -> Result<Vec<ContactView>, String> {
+    Ok(session(&state)?.contacts())
+}
+
+/// Originate a referral query (NIP-QW06). `sync_now` carries the forwards
+/// out; `referral_results(query_id)` collects the answers.
+#[tauri::command]
+fn find_by_skill(skill: String, state: State<'_, AppState>) -> Result<ReferralView, String> {
+    session(&state)?.find_by_skill(&skill).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn referral_results(
+    qid: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<FinalAnswerView>, String> {
+    Ok(session(&state)?.referral_results(&qid).to_vec())
+}
+
+/// This viewer's trust read on a pubkey (§5 — per-viewer, never global).
+#[tauri::command]
+fn trust(pubkey: String, state: State<'_, AppState>) -> Result<TrustView, String> {
+    Ok(session(&state)?.trust(&pubkey))
+}
+
+/// This identity's own global net position over verified credit.
+#[tauri::command]
+fn net_position(state: State<'_, AppState>) -> Result<f64, String> {
+    Ok(session(&state)?.net_position())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
-            // The key lives in the OS app-data directory, created 0700 by
-            // the core. First run generates one; every later run must find
-            // the same file, because there is no account to recover it
-            // from — losing it is losing the identity.
+            // The key and the event log live in the OS app-data directory,
+            // created 0700 by the core. First run generates the identity;
+            // every later run must find the same file — there is no account
+            // to recover it from.
             let dir = app.path().app_data_dir()?;
-            let identity = Vault::at(&dir).load_or_create()?;
-            let store = EventStore::open(&dir)?;
-            let sync = MailboxSync::new(identity.nostr_pubkey_hex());
+            let servers = vec!["https://qw-dash-api.knownby.work".to_string()];
+            let mut session = Session::open(
+                &Vault::at(&dir),
+                Box::new(EventStore::open(&dir)?),
+                servers.clone(),
+            )?;
+            // §8 forbids hard-coding one server as authoritative — the list
+            // is ordered by this identity's own trust view of each. The
+            // `pubkey` is blank until servers advertise one (unknown-risk
+            // → fee-order); wiring the call now means real ranking lands
+            // for free when they do, and a `QW_SERVERS`-style multi-entry
+            // list is trust-ordered from day one.
+            session.rank_servers(
+                &servers
+                    .iter()
+                    .map(|url| ServerCandidate {
+                        pubkey: String::new(),
+                        base_url: url.clone(),
+                        fee: 0.0,
+                    })
+                    .collect::<Vec<_>>(),
+            );
             app.manage(AppState {
-                identity,
-                sync: Mutex::new(sync),
-                store: Mutex::new(store),
-                servers: vec!["https://qw-dash-api.knownby.work".to_string()],
+                session: Mutex::new(session),
             });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![identity, follow, sync_now])
+        .invoke_handler(tauri::generate_handler![
+            identity,
+            follow,
+            sync_now,
+            taxonomy_leaves,
+            profile_get,
+            profile_set,
+            negotiations,
+            propose,
+            counter,
+            accept_contract,
+            contacts,
+            find_by_skill,
+            referral_results,
+            trust,
+            net_position
+        ])
         .run(tauri::generate_context!())
         .expect("error while running QW");
 }

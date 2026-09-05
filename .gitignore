@@ -25,3 +25,6 @@
 *.keystore
 *.apk
 *.aab
+
+# local one-time signing setup (see app/android-signing.patch)
+/app/android-signing-setup.sh

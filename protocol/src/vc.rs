@@ -28,7 +28,10 @@ const ALG: &str = "BIP340";
 const VCT: &str = "qw-work-claim";
 
 /// `Hours × Rate × ko × km` (abstract.md). `ko`/`km` are optional —
-/// omittable to simplify negotiation.
+/// omittable to simplify negotiation. When a party actor is an AI model,
+/// `ko` reflects model size / context window / agent-config quality and
+/// `km` the model's cognition — prompt adherence, hallucination rate
+/// (abstract.md, "When a party actor is an AI model").
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WorkClaim {
     pub hours: f64,

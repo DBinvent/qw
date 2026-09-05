@@ -1,0 +1,49 @@
+[Unit]
+Description=qw-web — single-user QW web client
+Documentation=https://github.com/DBinvent/qw/blob/main/app/README.md
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=exec
+User=qw-web
+Group=qw-web
+EnvironmentFile=/etc/qw-web/env
+ExecStart=/opt/qw-web/qw-web
+Restart=on-failure
+RestartSec=2
+
+# identity.key + events.jsonl live here; systemd creates it 0700, owned by User.
+StateDirectory=qw-web
+StateDirectoryMode=0700
+WorkingDirectory=/var/lib/qw-web
+
+# qw-web needs outbound TCP/DNS/TLS (rustls) and a listening socket on
+# loopback, and nothing else — everything below is off by default.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectClock=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectHostname=true
+ProtectProc=invisible
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

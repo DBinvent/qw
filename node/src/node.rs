@@ -6,13 +6,13 @@
 use std::collections::{HashMap, HashSet};
 
 use qw_protocol::events::{
-    skill_answer, skill_query, Event, SkillAnswer as SkillAnswerContent,
+    p_tag, skill_answer, skill_query, Event, SkillAnswer as SkillAnswerContent,
     SkillQuery as SkillQueryContent,
 };
 use qw_protocol::identity::Identity;
 use qw_protocol::trust::earned_skill_tags;
 
-use crate::contact::Contact;
+use crate::contact::{Contact, ContactPolicy};
 use crate::routing::select_forward_targets;
 #[cfg(test)]
 use crate::routing::{select_forward_targets_ranked, MatchSource};
@@ -105,6 +105,24 @@ impl Node {
 
     pub fn add_contact(&mut self, contact: Contact) {
         self.contacts.insert(contact.pubkey.clone(), contact);
+    }
+
+    /// Upsert a contact from a client refresh: set its `cached_skill_tags`
+    /// (their declared profile, as this node currently holds it) without
+    /// disturbing an existing contact's rate-limit window — unlike
+    /// [`Node::add_contact`], which replaces the whole record. New
+    /// contacts get [`ContactPolicy::open`].
+    pub fn note_contact(&mut self, pubkey: &str, cached_skill_tags: Vec<String>) {
+        match self.contacts.get_mut(pubkey) {
+            Some(c) => c.cached_skill_tags = cached_skill_tags,
+            None => {
+                self.contacts.insert(
+                    pubkey.to_string(),
+                    Contact::new(pubkey.to_string(), ContactPolicy::open())
+                        .with_cached_tags(cached_skill_tags),
+                );
+            }
+        }
     }
 
     pub fn contacts(&self) -> impl Iterator<Item = &Contact> {
@@ -288,8 +306,14 @@ impl Node {
                 if !c.allows_relay_at(outgoing_hops_from_origin) {
                     continue;
                 }
-                let event =
-                    skill_query(&self.pubkey(), received_event_id, &query).sign(&self.identity);
+                // The 9050 content is NIP-QW06-exact; a `["p", <next hop>]`
+                // tag is added so a `p`-addressed carrier (the coordination
+                // mailbox) can file it. A relay the contact subscribes to
+                // ignores it. `Delivery::to` still carries the recipient
+                // for an in-process orchestrator (`crate::network`).
+                let mut unsigned = skill_query(&self.pubkey(), received_event_id, &query);
+                unsigned.tags.push(p_tag(c.pubkey.clone()));
+                let event = unsigned.sign(&self.identity);
                 outcome.deliveries.push(Delivery::Query {
                     to: c.pubkey.clone(),
                     event,

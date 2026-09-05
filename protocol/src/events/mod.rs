@@ -191,6 +191,16 @@ impl Event {
     pub fn first_tag_value(&self, key: &str) -> Option<&str> {
         self.tag_values(key).next()
     }
+
+    /// The author-monotonic revision a replaceable QW record carries in a
+    /// `["revision", n]` tag (NIP-QW12). Absent or unparseable — a legacy
+    /// or malformed event — is `0`, which sorts oldest. Readers of a
+    /// replaceable kind order by `(revision, created_at, id)`.
+    pub fn revision(&self) -> u64 {
+        self.first_tag_value("revision")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0)
+    }
 }
 
 pub fn now() -> u64 {
@@ -229,6 +239,14 @@ pub fn e_tag_marked(event_id_hex: impl Into<String>, marker: &str) -> Tag {
 /// still carries the full tag; this is what relays filter on).
 pub fn t_tag(skill_tag: impl Into<String>) -> Tag {
     vec!["t".to_string(), skill_tag.into()]
+}
+
+/// The `["revision", n]` tag every replaceable QW record carries. The
+/// author bumps `n` on each edit; readers order by
+/// `(revision, created_at, id)` so a stale replica's clock cannot win
+/// (NIP-QW12). Read it back with [`Event::revision`].
+pub fn revision_tag(n: u64) -> Tag {
+    vec!["revision".to_string(), n.to_string()]
 }
 
 /// Parse a taxonomy tag's `(sector, domain)` prefix, e.g.
