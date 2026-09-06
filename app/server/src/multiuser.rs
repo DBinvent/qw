@@ -22,7 +22,7 @@ use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use qw_client_core::negotiation::{AcceptArgs, CounterArgs, ProposeArgs};
+use qw_client_core::negotiation::{AcceptArgs, AnnotateArgs, CounterArgs, ProposeArgs};
 use qw_client_core::profile::ProfileEdit;
 use qw_client_core::{taxonomy, HttpMailbox, Session};
 use qw_protocol::identity::Identity;
@@ -303,9 +303,11 @@ pub fn router(web: Arc<MuWeb>) -> Router {
         .route("/api/propose", post(propose))
         .route("/api/counter", post(counter))
         .route("/api/accept_contract", post(accept_contract))
+        .route("/api/annotate", post(annotate))
         .route("/api/contacts", post(contacts))
         .route("/api/find_by_skill", post(find_by_skill))
         .route("/api/referral_results", post(referral_results))
+        .route("/api/profile_of", post(profile_of))
         .route("/api/trust", post(trust))
         .route("/api/net_position", post(net_position))
         .route("/session", get(session_info))
@@ -471,6 +473,19 @@ async fn accept_contract(
     reply(with_session(web, headers, move |s| s.accept(b.args).map_err(text)).await)
 }
 
+#[derive(Deserialize)]
+struct AnnotateBody {
+    args: AnnotateArgs,
+}
+/// Attach a dispute annotation (kind 9030, NIP-QW04) to a contract.
+async fn annotate(
+    State(web): State<Arc<MuWeb>>,
+    headers: HeaderMap,
+    Json(b): Json<AnnotateBody>,
+) -> Response {
+    reply(with_session(web, headers, move |s| s.annotate(b.args).map_err(text)).await)
+}
+
 async fn contacts(State(web): State<Arc<MuWeb>>, headers: HeaderMap) -> Response {
     reply(with_session(web, headers, |s| Ok::<_, String>(s.contacts())).await)
 }
@@ -499,6 +514,26 @@ async fn referral_results(
     reply(
         with_session(web, headers, move |s| {
             Ok::<_, String>(s.referral_results(&b.qid).to_vec())
+        })
+        .await,
+    )
+}
+
+#[derive(Deserialize)]
+struct ProfileOfBody {
+    pubkey: String,
+}
+/// The full profile this session holds for another pubkey — for a
+/// non-contact, whatever rode back on a referral answer (NIP-QW06).
+/// `null` when none is held.
+async fn profile_of(
+    State(web): State<Arc<MuWeb>>,
+    headers: HeaderMap,
+    Json(b): Json<ProfileOfBody>,
+) -> Response {
+    reply(
+        with_session(web, headers, move |s| {
+            Ok::<_, String>(s.profile_of(&b.pubkey))
         })
         .await,
     )

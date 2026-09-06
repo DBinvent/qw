@@ -14,6 +14,14 @@ export const FAQ_DOC_URL = `${DOCS_BASE}/qw-design-faq.md`
 export const SOURCE_URL = GITHUB_URL
 export const SOURCE_LABEL = 'View source'
 
+// The hosted browser build of the client: multi-user `qw-web` behind the
+// shared tunnel. It composes and displays exactly what the Android app
+// does — profile, introductions, the job lifecycle, referral queries,
+// trust reads, dispute annotations — but the key it generates lives in
+// server memory while you are signed in, not on your device. That is a
+// preview, not the trust-anchoring client, and the page says so itself.
+export const WEB_UI_URL = 'https://qw.knownby.work'
+
 // Files inside the public repo, linked from the join guide. `main` is the
 // default branch and the one Workers Builds deploys this site from, so a
 // blob link here and the deployed page always describe the same tree.

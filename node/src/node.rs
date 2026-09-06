@@ -80,6 +80,11 @@ pub struct Node {
     /// [`Node::refresh_earned_skill_tags`] rather than set by hand, because
     /// the whole value of the list is that its author did not choose it.
     own_earned_skill_tags: Vec<String>,
+    /// This node's own current profile event (kind 10020), attached to a
+    /// referral answer it originates so a non-contact requester can see
+    /// the full self-description behind the one matched tag (NIP-QW06
+    /// "profile on the answer"). `None` until a caller supplies it.
+    own_profile: Option<Event>,
     relay_table: HashMap<String, RelayState>,
     /// query_ids already processed by this node — first arrival wins.
     /// Bounds propagation on a cyclic contact graph; see NIP-QW06's scope
@@ -94,6 +99,7 @@ impl Node {
             contacts: HashMap::new(),
             own_skill_tags: Vec::new(),
             own_earned_skill_tags: Vec::new(),
+            own_profile: None,
             relay_table: HashMap::new(),
             seen: HashSet::new(),
         }
@@ -131,6 +137,13 @@ impl Node {
 
     pub fn set_own_skill_tags(&mut self, tags: Vec<String>) {
         self.own_skill_tags = tags;
+    }
+
+    /// Supply this node's own current profile event (kind 10020), attached
+    /// to any referral answer it originates so a non-contact requester can
+    /// view the full self-description, not just the matched tag.
+    pub fn set_own_profile(&mut self, profile: Option<Event>) {
+        self.own_profile = profile;
     }
 
     /// Recompute this node's own earned tags and every contact's, from the
@@ -275,6 +288,9 @@ impl Node {
                 responder_pubkey: self.pubkey(),
                 matched_skill_tag: skill_tag.to_string(),
                 hops: self_match_hops,
+                // Attach our own profile so a non-contact requester sees
+                // the whole self-description, not just this one tag.
+                profile: self.own_profile.clone(),
             };
             if let Some(prior_id) = received_event_id {
                 let event = skill_answer(&self.pubkey(), answer_target, prior_id, &content)
@@ -407,6 +423,71 @@ mod tests {
         let final_content: SkillAnswerContent =
             serde_json::from_str(&relayed_event.content).unwrap();
         assert_eq!(final_content.hops, 1);
+    }
+
+    #[test]
+    fn a_matched_answer_carries_the_responders_profile_along_the_path() {
+        use qw_protocol::events::{profile_skill_tags, ProfileSkillTags};
+
+        let requester = Node::new(Identity::generate());
+        let mut hop1 = Node::new(Identity::generate());
+
+        // The responder signs a full profile (two skills) and hands it to
+        // its node — this is the "open to view in the network" surface.
+        let responder_id = Identity::generate();
+        let mut responder =
+            Node::new(Identity::from_secret_bytes(responder_id.secret_bytes()).unwrap());
+        responder.set_own_skill_tags(vec!["it/backend/languages#rust".to_string()]);
+        let prof = profile_skill_tags(
+            &responder_id.nostr_pubkey_hex(),
+            1,
+            &ProfileSkillTags {
+                display_name: Some("Dana".to_string()),
+                skill_tags: vec![
+                    "it/backend/languages#rust".to_string(),
+                    "it/backend/languages#go".to_string(),
+                ],
+            },
+        )
+        .sign(&responder_id);
+        responder.set_own_profile(Some(prof.clone()));
+
+        // Only hop1 <-> responder is a real edge; the requester reaches the
+        // responder through hop1 and holds no direct contact with them.
+        linked(&mut hop1, &mut responder);
+
+        let outcome =
+            hop1.begin_relay_chain("q1", "it/backend/languages#rust", 3, &requester.pubkey());
+        let Delivery::Query { event: query, .. } = &outcome.deliveries[0] else {
+            panic!("expected a forwarded query")
+        };
+
+        let ro = responder.receive_query(&hop1.pubkey(), query, 1_000);
+        let Delivery::Answer { event: answer, .. } = &ro.deliveries[0] else {
+            panic!("expected an answer")
+        };
+        let carried = serde_json::from_str::<SkillAnswerContent>(&answer.content)
+            .unwrap()
+            .profile
+            .expect("the answer carries the responder's profile");
+        assert_eq!(carried.id, prof.id);
+        assert!(carried.verify().is_ok());
+        assert_eq!(carried.pubkey, responder.pubkey());
+
+        // and it is still there after hop1 relays the answer to the requester
+        let Delivery::Answer { event: relayed, .. } =
+            hop1.receive_answer(answer).expect("hop1 relays it onward")
+        else {
+            panic!("expected a relayed answer")
+        };
+        assert_eq!(
+            serde_json::from_str::<SkillAnswerContent>(&relayed.content)
+                .unwrap()
+                .profile
+                .unwrap()
+                .id,
+            prof.id,
+        );
     }
 
     #[test]

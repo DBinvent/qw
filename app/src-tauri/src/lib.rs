@@ -14,7 +14,9 @@
 
 use std::sync::{Mutex, MutexGuard};
 
-use qw_client_core::negotiation::{AcceptArgs, CounterArgs, NegotiationView, ProposeArgs};
+use qw_client_core::negotiation::{
+    AcceptArgs, AnnotateArgs, CounterArgs, NegotiationView, ProposeArgs,
+};
 use qw_client_core::profile::{ProfileEdit, ProfileView};
 use qw_client_core::session::{
     ContactView, FinalAnswerView, FollowResult, IdentityView, ReferralView, SyncView, TrustView,
@@ -92,6 +94,13 @@ fn accept_contract(args: AcceptArgs, state: State<'_, AppState>) -> Result<Strin
     session(&state)?.accept(args).map_err(|e| e.to_string())
 }
 
+/// Attach a dispute annotation (kind 9030, NIP-QW04) to a contract — a
+/// reply, an audit request, or a third-party audit opinion.
+#[tauri::command]
+fn annotate(args: AnnotateArgs, state: State<'_, AppState>) -> Result<String, String> {
+    session(&state)?.annotate(args).map_err(|e| e.to_string())
+}
+
 /// This identity's hop-1 contacts and the skill tags routing knows them by.
 #[tauri::command]
 fn contacts(state: State<'_, AppState>) -> Result<Vec<ContactView>, String> {
@@ -111,6 +120,14 @@ fn referral_results(
     state: State<'_, AppState>,
 ) -> Result<Vec<FinalAnswerView>, String> {
     Ok(session(&state)?.referral_results(&qid).to_vec())
+}
+
+/// The full profile this client holds for another pubkey — for a
+/// non-contact, whatever rode back on a referral answer (NIP-QW06).
+/// `None` when none is held.
+#[tauri::command]
+fn profile_of(pubkey: String, state: State<'_, AppState>) -> Result<Option<ProfileView>, String> {
+    Ok(session(&state)?.profile_of(&pubkey))
 }
 
 /// This viewer's trust read on a pubkey (§5 — per-viewer, never global).
@@ -172,9 +189,11 @@ pub fn run() {
             propose,
             counter,
             accept_contract,
+            annotate,
             contacts,
             find_by_skill,
             referral_results,
+            profile_of,
             trust,
             net_position
         ])

@@ -59,3 +59,35 @@ No annotation is restricted at the protocol level to being signed only by
 the "correct" party (a relay/client cannot verify who is "the party being
 criticized" without replaying the whole contract graph) — that check, and
 any resulting weighting, is §5 per-viewer scoring logic, not this NIP.
+
+## Carriage (client note, not wire format)
+
+`qw_client_core::Session::annotate` builds and signs a 9030 from held
+history (2026-09-06). Client-level choices, none a change to the 9030
+*content*:
+
+- **`["p", …]` on the annotation.** The wire format is `["e", <target>]`
+  only, but the coordination mailbox files by `p` tag, so `annotate` adds
+  a `p` tag for the *other* contract party (both parties, when the signer
+  is a third-party auditor) purely so the annotation is deliverable — the
+  same carriage note NIP-QW06 makes for a 9050. A relay a party
+  subscribes to ignores it.
+- **Where it attaches.** A client annotates a contract by its root offer
+  id; the annotation targets that contract's current negotiation head
+  unless the caller names another event the contract already involves (a
+  milestone, a completion). Targets are held to the events
+  `qw_protocol::contract::Contract::from_events` re-collects annotations
+  for, so a signed annotation always surfaces on the contract view rather
+  than becoming an orphan — threading a reply onto another annotation is
+  therefore not yet expressible, a documented follow-up.
+- **Signer rule, client-side.** `reply` and `audit_request` require the
+  signer to be the client or the worker; `audit_opinion` does not (an
+  auditor is by definition a third party) but still resolves a real
+  target inside the contract. Any contract state is annotatable —
+  annotating one stuck in limbo is the whole point.
+
+`NegotiationView` carries the resulting rows (`disputes`, oldest first;
+`under_review` = an `audit_request` with no `audit_opinion` answering it
+yet). `AuditOpinion` events are **not** yet indexed by their author's
+pubkey — the "an auditor stakes their own record" half of the design is
+still to come.

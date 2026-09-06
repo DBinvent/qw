@@ -76,3 +76,19 @@ more. A reader resolving "the current profile" for a pubkey:
 `id`); they simply stop being authoritative the moment a `10020` exists.
 Whether to surface skill-tag history at all is a client UX choice, not
 fixed by this NIP.
+
+## Visibility past a direct contact
+
+The profile has no `p` tag and no addressee, so nothing routes it: a
+peer holds yours only if they are a replica of you (NIP-QW12), synced it
+off a shared relay, or received it inside another event. NIP-QW06 adds
+the last of those — a `10020` may travel as the optional `profile` field
+of a kind-`9051` skill answer, so a requester who matched you through a
+vouched referral path, with no edge to you, still gets your whole
+self-description rather than the single tag their query hit.
+
+That is the intended reach: **open to view by anyone the referral
+network legitimately connects to you, still not a broadcast.** The event
+is identical whichever way it arrives, is re-verified on receipt, and is
+folded by the same `(revision, created_at, id)` rule — carriage never
+confers authority, the signature does.

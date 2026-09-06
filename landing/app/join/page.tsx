@@ -3,6 +3,7 @@ import {
   ArrowUpRight,
   CheckCircle2,
   CircleDashed,
+  Globe,
   Hammer,
   KeyRound,
   Link2,
@@ -12,7 +13,14 @@ import {
 } from 'lucide-react'
 import { SiteHeader } from '@/components/qw/site-header'
 import { Footer } from '@/components/qw/footer'
-import { ANDROID_APK_URL, APP_README_URL, GITHUB_URL, REPO_README_URL, nipUrl } from '@/lib/links'
+import {
+  ANDROID_APK_URL,
+  APP_README_URL,
+  GITHUB_URL,
+  REPO_README_URL,
+  WEB_UI_URL,
+  nipUrl,
+} from '@/lib/links'
 import { AndroidDownload, AndroidVersion } from '@/components/qw/android-release'
 
 // The detail behind the "How to join" card on the home page. The card states
@@ -102,10 +110,10 @@ const platforms = [
   },
   {
     name: 'Web',
-    state: 'planned',
-    tone: 'todo' as const,
+    state: 'hosted preview',
+    tone: 'progress' as const,
     detail:
-      'Compose and display only, with signing delegated by QR or deep link to an external signer app. The delegation protocol exists (qw-signer: URIs); the web app does not.',
+      'The same shell in a browser, at qw.knownby.work — profile, introductions, the job lifecycle, referral queries, trust reads and dispute annotations all work. What differs is key custody: it registers you with a passphrase and holds the signing key in server memory while you are signed in, rather than on your device. Good for a look; export your seed and move to the app for anything you need to keep. Delegated signing to an external signer (qw-signer: URIs) is still the planned endgame.',
   },
 ]
 
@@ -188,6 +196,32 @@ export default function JoinPage() {
                 Or build it from source below. Either way nothing here is a waiting list: joining needs
                 no permission from us, and the footer signup only exists to say when iOS and the store
                 builds land.
+              </p>
+            </div>
+
+            {/* The web UI is the no-install path, so it belongs on the join
+                page too — but its caveat is louder than Android's (someone
+                else's server holds the key), so it gets its own card and its
+                own colour rather than sitting under the APK button. */}
+            <div className="mt-4 rounded-xl border border-danger/40 bg-card p-5">
+              <p className="flex items-center gap-2 font-mono text-xs uppercase tracking-widest text-danger">
+                <Globe className="size-4" />
+                Web UI — hosted preview
+              </p>
+              <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
+                <a
+                  href={WEB_UI_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary hover:text-primary/80"
+                >
+                  qw.knownby.work
+                </a>{' '}
+                runs the same shell in a browser with nothing to install. It registers you with a
+                passphrase and keeps the signing key in server memory for the length of your session —
+                not on your device, and readable by whoever runs the host. Use it to see how QW works;
+                the moment a record matters, export your seed from the Keys panel and open it in the
+                app, where the key never leaves your hardware.
               </p>
             </div>
           </div>

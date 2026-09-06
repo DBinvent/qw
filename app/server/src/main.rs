@@ -30,7 +30,7 @@ use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use qw_client_core::negotiation::{AcceptArgs, CounterArgs, ProposeArgs};
+use qw_client_core::negotiation::{AcceptArgs, AnnotateArgs, CounterArgs, ProposeArgs};
 use qw_client_core::profile::ProfileEdit;
 use qw_client_core::{
     taxonomy, EventStore, HttpMailbox, LedgerCoverage, PullResponse, ServerCandidate, Session, Vault,
@@ -125,9 +125,11 @@ fn router(web: Arc<Web>) -> Router {
         .route("/api/propose", post(propose))
         .route("/api/counter", post(counter))
         .route("/api/accept_contract", post(accept_contract))
+        .route("/api/annotate", post(annotate))
         .route("/api/contacts", post(contacts))
         .route("/api/find_by_skill", post(find_by_skill))
         .route("/api/referral_results", post(referral_results))
+        .route("/api/profile_of", post(profile_of))
         .route("/api/trust", post(trust))
         .route("/api/net_position", post(net_position))
         .route("/ledger/pull", post(ledger_pull))
@@ -241,6 +243,15 @@ async fn accept_contract(State(web): State<Arc<Web>>, Json(b): Json<AcceptBody>)
     reply(on_session(web, move |s| s.accept(b.args).map_err(text)).await)
 }
 
+#[derive(Deserialize)]
+struct AnnotateBody {
+    args: AnnotateArgs,
+}
+/// Attach a dispute annotation (kind 9030, NIP-QW04) to a contract.
+async fn annotate(State(web): State<Arc<Web>>, Json(b): Json<AnnotateBody>) -> Response {
+    reply(on_session(web, move |s| s.annotate(b.args).map_err(text)).await)
+}
+
 async fn contacts(State(web): State<Arc<Web>>) -> Response {
     reply(on_session(web, |s| Ok::<_, String>(s.contacts())).await)
 }
@@ -262,6 +273,17 @@ async fn referral_results(
     Json(b): Json<ReferralResultsBody>,
 ) -> Response {
     reply(on_session(web, move |s| Ok::<_, String>(s.referral_results(&b.qid).to_vec())).await)
+}
+
+#[derive(Deserialize)]
+struct ProfileOfBody {
+    pubkey: String,
+}
+/// The full profile this session holds for another pubkey — for a
+/// non-contact, whatever rode back on a referral answer (NIP-QW06).
+/// `null` when none is held.
+async fn profile_of(State(web): State<Arc<Web>>, Json(b): Json<ProfileOfBody>) -> Response {
+    reply(on_session(web, move |s| Ok::<_, String>(s.profile_of(&b.pubkey))).await)
 }
 
 #[derive(Deserialize)]
@@ -431,6 +453,37 @@ mod tests {
         assert_eq!(negs.len(), 1);
         assert_eq!(negs[0]["am_client"], true);
         assert_eq!(negs[0]["head_terms"]["rate"], 40.0);
+        let offer_id = negs[0]["offer_event_id"].as_str().unwrap().to_string();
+
+        // annotate that contract with an audit request (NIP-QW04)
+        let (st, ann) = call(
+            &app,
+            "/api/annotate",
+            json!({ "args": {
+                "offer_event_id": offer_id, "kind": "audit_request",
+                "body": "milestone was never delivered"
+            }}),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(ann.as_str().unwrap().len(), 64, "returns the annotation id");
+
+        let (_, negs) = call(&app, "/api/negotiations", json!({})).await;
+        assert_eq!(negs[0]["disputes"].as_array().unwrap().len(), 1);
+        assert_eq!(negs[0]["disputes"][0]["annotation_type"], "audit_request");
+        assert_eq!(negs[0]["under_review"], true);
+
+        // a bad audit outcome is a 422 naming the fix
+        let (st, err) = call(
+            &app,
+            "/api/annotate",
+            json!({ "args": {
+                "offer_event_id": offer_id, "kind": "audit_opinion", "body": "x"
+            }}),
+        )
+        .await;
+        assert_eq!(st, StatusCode::UNPROCESSABLE_ENTITY);
+        assert!(err["error"].as_str().unwrap().contains("outcome"));
     }
 
     #[tokio::test]
@@ -499,10 +552,25 @@ mod tests {
         assert_eq!(st, StatusCode::OK);
         let qid = r["query_id"].as_str().unwrap();
         assert_eq!(r["own_match"]["matched_skill_tag"], "it/backend/languages#rust");
+        // the own-match row carries the full declared profile, not just the tag
+        assert_eq!(
+            r["own_match"]["declared_skill_tags"],
+            json!(["it/backend/languages#rust"])
+        );
 
         let (st, res) = call(&app, "/api/referral_results", json!({ "qid": qid })).await;
         assert_eq!(st, StatusCode::OK);
         assert!(res.as_array().unwrap().is_empty());
+
+        // profile_of resolves a held profile (here, the host's own) and is
+        // null for a pubkey nothing is held for
+        let (_, id) = call(&app, "/api/identity", json!({})).await;
+        let me = id["pubkey"].as_str().unwrap();
+        let (st, p) = call(&app, "/api/profile_of", json!({ "pubkey": me })).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(p["tags"], json!(["it/backend/languages#rust"]));
+        let (_, none) = call(&app, "/api/profile_of", json!({ "pubkey": "b".repeat(64) })).await;
+        assert_eq!(none, json!(null));
 
         // an unresolvable skill is a 422 naming it
         let (st, err) = call(&app, "/api/find_by_skill", json!({ "skill": "totally not a skill" })).await;

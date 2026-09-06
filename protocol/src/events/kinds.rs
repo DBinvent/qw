@@ -9,7 +9,7 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use super::{e_tag, e_tag_marked, p_tag, revision_tag, t_tag, Tag, UnsignedEvent};
+use super::{e_tag, e_tag_marked, p_tag, revision_tag, t_tag, Event, Tag, UnsignedEvent};
 
 // --- job lifecycle (NIP-QW01) ---
 pub const KIND_JOB_OFFER: u16 = 9000;
@@ -502,6 +502,18 @@ pub struct SkillAnswer {
     /// Path length from hop 1 to the responder (the matching query
     /// event's `hops_from_origin`, plus this hop).
     pub hops: u8,
+    /// The responder's own current profile event (kind 10020,
+    /// [`KIND_PROFILE`]), attached so a requester who is **not** a contact
+    /// can view what they found — the responder's other skills, display
+    /// name, external links — not just `matched_skill_tag`. Set by the
+    /// responder on the leg it signs; relay hops carry it through
+    /// unchanged. Not a broadcast: it travels only along the vouched relay
+    /// path of a query that matched. A reader **MUST** re-verify it and
+    /// check `profile.pubkey == responder_pubkey` before reading a byte,
+    /// and it changes nothing about trust (§5), which reads countersigned
+    /// work alone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile: Option<Event>,
 }
 
 /// The matching node's attestation, referencing the specific forward
@@ -1103,6 +1115,7 @@ mod tests {
             responder_pubkey: responder.nostr_pubkey_hex(),
             matched_skill_tag: "it/backend/languages#rust".to_string(),
             hops: 2,
+            profile: None,
         };
         let event = skill_answer(
             &responder.nostr_pubkey_hex(),
@@ -1116,6 +1129,50 @@ mod tests {
             event.first_tag_value("p"),
             Some(upstream.nostr_pubkey_hex().as_str())
         );
+    }
+
+    #[test]
+    fn skill_answer_profile_is_optional_and_round_trips_whole() {
+        let responder = Identity::generate();
+        let bare = SkillAnswer {
+            query_id: "q1".to_string(),
+            responder_pubkey: responder.nostr_pubkey_hex(),
+            matched_skill_tag: "it/backend/languages#rust".to_string(),
+            hops: 1,
+            profile: None,
+        };
+        // An absent profile stays off the wire — a matched contact who is
+        // already known needs nothing extra attached.
+        let json = serde_json::to_string(&bare).unwrap();
+        assert!(!json.contains("profile"), "None serialises to nothing");
+        let decoded: SkillAnswer = serde_json::from_str(&json).unwrap();
+        assert!(decoded.profile.is_none());
+
+        // A whole signed profile event rides along untouched and still
+        // verifies after the round trip — this is what lets a non-contact
+        // see the responder's full self-description (NIP-QW06).
+        let prof = profile_skill_tags(
+            &responder.nostr_pubkey_hex(),
+            1,
+            &ProfileSkillTags {
+                display_name: Some("Dana".to_string()),
+                skill_tags: vec![
+                    "it/backend/languages#rust".to_string(),
+                    "it/backend/languages#go".to_string(),
+                ],
+            },
+        )
+        .sign(&responder);
+        let with_profile = SkillAnswer {
+            profile: Some(prof.clone()),
+            ..bare
+        };
+        let back: SkillAnswer =
+            serde_json::from_str(&serde_json::to_string(&with_profile).unwrap()).unwrap();
+        let carried = back.profile.expect("profile survives the round trip");
+        assert_eq!(carried.id, prof.id);
+        assert!(carried.verify().is_ok());
+        assert_eq!(carried.kind, KIND_PROFILE);
     }
 
     #[test]

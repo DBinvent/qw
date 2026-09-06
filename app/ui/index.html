@@ -105,11 +105,32 @@
     letter-spacing: .04em; background: #09090b; border: 1px solid #7c3aed;
     border-radius: .4rem; padding: .8rem; margin: .5rem 0 0;
     overflow-wrap: anywhere; user-select: all; -webkit-user-select: all; }
+  /* Shown on every web deployment, signed in or not: this build keeps the
+     signing key in server memory, which the Tauri app never does. Rose
+     border so it reads as a caution, not a section. */
+  #web-disclaimer { border: 1px solid #fb7185; border-radius: .6rem;
+    padding: .8rem 1rem; margin: 0 0 1rem; font-size: 13px; line-height: 1.55;
+    color: #fecdd3; background: #1a0f13; }
+  #web-disclaimer strong { color: #fb7185; }
+  #web-disclaimer a { color: inherit; }
 </style>
 </head>
 <body>
   <main>
   <h1>QW</h1>
+
+  <!-- Unhidden by boot() on any web build (isWeb). The hosted version
+       generates and holds your key in server memory for the length of a
+       session; the app never does. Kept visible after sign-in too, not
+       just on the auth screen — the risk does not go away once you are in. -->
+  <div id="web-disclaimer" hidden>
+    <strong>Hosted preview.</strong> This browser build keeps your signing
+    key in the server's memory while you are signed in — it is not on your
+    device, and whoever runs this host can reach it. Fine for trying QW.
+    Before anything you need to keep, open the <em>Keys</em> panel, copy your
+    identity seed, and move to the app, where the key never leaves your
+    hardware.
+  </div>
 
   <!-- Only ever shown on a multi-user qw-web host, and only when not signed
        in: the very first backend call comes back 401. The Tauri shell and a
@@ -520,27 +541,81 @@ async function showNegotiations() {
       (n.rounds ? ` · round ${n.rounds}` : '') + ` — ${t.terms}`;
     li.appendChild(terms);
 
-    if (n.can_counter || n.can_accept) {
-      const actions = document.createElement('div');
-      actions.className = 'neg-actions';
-      if (n.can_counter) {
-        const b = document.createElement('button');
-        b.type = 'button';
-        b.className = 'ghost';
-        b.textContent = 'Counter';
-        b.onclick = () => openCounter(n);
-        actions.appendChild(b);
-      }
-      if (n.can_accept) {
-        const b = document.createElement('button');
-        b.type = 'button';
-        b.textContent = 'Accept';
-        b.onclick = () => acceptOffer(n.offer_event_id);
-        actions.appendChild(b);
-      }
-      li.appendChild(actions);
+    // NIP-QW04 dispute thread: the record is never edited, annotations
+    // ride alongside. "Under review" = an open audit request, no opinion.
+    if (n.under_review) {
+      st.textContent = st.textContent + ' · under review';
     }
+    if (n.disputes && n.disputes.length) {
+      const thread = document.createElement('ul');
+      thread.className = 'skills';
+      for (const d of n.disputes) {
+        const row = document.createElement('li');
+        const who = document.createElement('span');
+        who.className = 'skill-tag';
+        who.textContent = (d.mine ? 'you' : short(d.author_npub)) + ' · ' + d.annotation_type.replace('_', ' ');
+        row.appendChild(who);
+        if (d.outcome) row.appendChild(badge(d.outcome.replace('_', ' '), 'contract'));
+        const body = document.createElement('span');
+        body.className = 'muted';
+        body.textContent = ' ' + d.body;
+        row.appendChild(body);
+        thread.appendChild(row);
+      }
+      li.appendChild(thread);
+    }
+
+    const actions = document.createElement('div');
+    actions.className = 'neg-actions';
+    if (n.can_counter) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'ghost';
+      b.textContent = 'Counter';
+      b.onclick = () => openCounter(n);
+      actions.appendChild(b);
+    }
+    if (n.can_accept) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = 'Accept';
+      b.onclick = () => acceptOffer(n.offer_event_id);
+      actions.appendChild(b);
+    }
+    // Available in any state — a limbo contract is exactly what an
+    // annotation is for.
+    const ann = document.createElement('button');
+    ann.type = 'button';
+    ann.className = 'ghost';
+    ann.textContent = 'Annotate';
+    ann.onclick = () => annotateOffer(n.offer_event_id);
+    actions.appendChild(ann);
+    li.appendChild(actions);
     list.appendChild(li);
+  }
+}
+
+// A dispute annotation (kind 9030). Low-ceremony prompt flow, matching
+// the rest of this shell: pick a kind, type the note, and — for an audit
+// opinion — an outcome.
+async function annotateOffer(offerId) {
+  const kind = (window.prompt(
+    'Annotation kind: reply, audit_request, or audit_opinion', 'reply') || '').trim();
+  if (!kind) return;
+  const body = (window.prompt('Note (kept alongside the record, never edits it):') || '').trim();
+  if (!body) return;
+  let outcome = null;
+  if (kind === 'audit_opinion') {
+    outcome = (window.prompt(
+      'Outcome: favors_client, favors_worker, split, inconclusive') || '').trim() || null;
+  }
+  try {
+    await invoke('annotate', { args: { offer_event_id: offerId, kind, body, outcome } });
+    await invoke('sync_now');
+    await showNegotiations();
+  } catch (e) {
+    document.getElementById('negs-empty').textContent = String(e);
+    document.getElementById('negs-empty').hidden = false;
   }
 }
 
@@ -769,7 +844,10 @@ function renderPeople(el, people, extra) {
     const li = document.createElement('li');
     const who = document.createElement('span');
     who.className = 'skill-tag';
-    who.textContent = short(p.npub || p.responder_npub || p.pubkey || p.responder_pubkey);
+    const npub = short(p.npub || p.responder_npub || p.pubkey || p.responder_pubkey);
+    // A referral answer from a non-contact carries their own signed
+    // profile, so we can show the name they published, not just the npub.
+    who.textContent = p.display_name ? `${p.display_name} · ${npub}` : npub;
     li.appendChild(who);
     for (const t of p.declared_skill_tags || []) li.appendChild(badge(t, ''));
     for (const t of p.earned_skill_tags || []) li.appendChild(badge(t, 'contract'));
@@ -954,6 +1032,10 @@ async function authFetch(path, body) {
 }
 
 async function boot() {
+  // The hosted build holds the key server-side; say so, and keep saying so
+  // after sign-in. Irrelevant in the Tauri shell, where the key is local.
+  if (isWeb) document.getElementById('web-disclaimer').hidden = false;
+
   // One probe up front: is this a login host, and are we already on a
   // valid cookie? It makes `multiUser` reliable even on a plain reload,
   // where nothing 401s. A host too old to answer leaves it to the 401

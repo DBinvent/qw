@@ -799,6 +799,31 @@ the standing client / protocol gaps, roughly in order.
   global number — a shortest verified `CreditIssuance` path (or
   unknown-risk, not zero) computed from held records, with the path's
   edge ids for spot-checking (§8).
+- ***Profile visible past hop 1*** ("profile adv" — open to view by anyone
+  the referral network connects you to, still not a broadcast) — a
+  kind-9051 skill answer now carries the responder's own signed profile
+  (kind `10020`) as an optional `profile` field (`SkillAnswer.profile`,
+  `Node::set_own_profile`). `Session::absorb_answer` re-verifies it
+  (`kind == 10020`, `pubkey == responder_pubkey`, signature) and merges it
+  into history; `FinalAnswerView` gained `display_name` /
+  `declared_skill_tags`, and `Session::profile_of(pubkey)` +
+  `/api/profile_of` (both hosts) + a Tauri command expose any held
+  profile. So a requester who matched a stranger through a vouched path
+  sees their whole self-description, not just the one matched tag.
+  NIP-QW06 "`profile` — the responder's self-description on the answer",
+  NIP-QW03 "Visibility past a direct contact".
+- ***Dispute annotation / audit (NIP-QW04, kind 9030)*** — `Session::annotate`
+  + `qw_client_core::negotiation::{annotate, AnnotateArgs}`: sign a
+  **reply**, an **audit request**, or a third-party **audit opinion**
+  against a contract, never mutating the record. `reply`/`audit_request`
+  are party-only, `audit_opinion` is third-party-only and needs an
+  outcome; a `["p", …]` carriage tag makes it mailbox-deliverable to the
+  other party (both, for an auditor). `NegotiationView` gained `disputes`
+  (rows, oldest first) and `under_review` (an open audit request with no
+  opinion yet). `/api/annotate` on both hosts + a Tauri command; the UI
+  shows the thread and an "annotate" control on each negotiation. Still
+  to come: indexing `audit_opinion` by its author (the auditor's own
+  staked record), and threading a reply onto another annotation.
 
 **Standing client / protocol gaps — the protocol is well ahead of the client:**
 

@@ -79,7 +79,8 @@ Tags: `["p", <upstream hop pubkey>]`, `["e", <matched query event id>,
   "query_id": "b7e9...",
   "responder_pubkey": "<hex pubkey of the node that actually has the matching skill>",
   "matched_skill_tag": "it/backend/languages#rust",
-  "hops": 2
+  "hops": 2,
+  "profile": { "id": "…", "pubkey": "…", "kind": 10020, "…": "…" }
 }
 ```
 
@@ -96,6 +97,41 @@ contract with.
 `hops` is the path length from hop 1 to the responder, for the "2 hops
 via Anna" display and for `qw_node`'s deduped-by-pubkey, path-count
 answer collection at the requester.
+
+### `profile` — the responder's self-description on the answer
+
+`profile` is **optional** and, when present, is the responder's own
+current profile event verbatim (kind `10020`, NIP-QW03) — the same
+replaceable event any replica of theirs would serve. It is what makes a
+referral result *viewable*: the requester reached this person along a
+vouched path but shares no edge with them, has never held their profile
+(a `10020` carries no `p` tag, so no mailbox ever routed it here), and
+would otherwise see only the one `matched_skill_tag`. With the profile
+attached they see the whole standing self-description — display name,
+every declared skill — of someone found through the network rather than
+through a direct introduction.
+
+This is **not a broadcast**. The profile rides back only along the relay
+chain of a query that already matched, to a requester who already earned
+the answer by being on a vouched path; it is not published, indexed, or
+offered to anyone who did not ask.
+
+A reader **MUST** treat it as untrusted until checked, exactly as it
+would any synced event:
+
+- `profile.verify()` passes (valid BIP-340 signature over the event id);
+- `profile.kind == 10020`;
+- `profile.pubkey == responder_pubkey`.
+
+On all three, merge it into held history like any other verified event —
+later views (and any `10020` from a subsequent ledger sync) fold over it
+by the NIP-QW03 `(revision, created_at, id)` rule. On any failure, drop
+the `profile` field and keep the rest of the answer: a missing or bad
+profile never invalidates a valid referral result.
+
+A relay leaves `profile` untouched as it re-signs its leg — it is
+content, fixed to the responder like `responder_pubkey`, not per-hop
+state.
 
 ## Per-contact policy (not a wire format — local node state)
 
