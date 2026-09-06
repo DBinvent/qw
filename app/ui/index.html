@@ -113,6 +113,33 @@
     color: #fecdd3; background: #1a0f13; }
   #web-disclaimer strong { color: #fb7185; }
   #web-disclaimer a { color: inherit; }
+  /* Top navigation. The one page this file used to be is now six, shown one
+     at a time; the rest carry [hidden]. */
+  #topnav { display: flex; flex-wrap: wrap; gap: .4rem; margin: 0 0 1.25rem;
+            border-bottom: 1px solid #27272a; padding-bottom: .6rem; }
+  #topnav button { margin: 0; min-height: 0; padding: .45rem .8rem; font-size: 13px;
+                   background: #18181b; color: #a1a1aa; }
+  #topnav button.active { background: #7c3aed; color: #fff; }
+  .page[hidden] { display: none; }
+  /* The invite QR is clickable: small inline, full-screen on tap. */
+  .qr { cursor: zoom-in; }
+  #qr-modal { position: fixed; inset: 0; z-index: 50; display: flex;
+              align-items: center; justify-content: center; padding: 1.5rem;
+              background: rgba(0, 0, 0, .86); }
+  #qr-modal[hidden] { display: none; }
+  #qr-modal .qr { width: auto; max-width: min(88vw, 88vh); cursor: zoom-out; }
+  #copy svg { vertical-align: -2px; margin-right: .4rem; }
+  /* Per-row detail an expander reveals — a raw npub has no spaces, so it
+     needs its own line and a hard break. */
+  .row-detail { margin-top: .4rem; flex-basis: 100%; word-break: break-all; }
+  /* Register / sign-in explainer: the passphrase is the key, and there is
+     no email anywhere in the flow. */
+  #auth-note { border: 1px solid #27272a; border-radius: .5rem; padding: .7rem .9rem;
+               margin: .85rem 0; font-size: 12.5px; line-height: 1.5; color: #a1a1aa; }
+  #auth-note strong { color: #c4b5fd; }
+  #auth-note p { margin: .45rem 0; }
+  #auth-note p:first-child { margin-top: 0; }
+  #auth-note p:last-child { margin-bottom: 0; }
 </style>
 </head>
 <body>
@@ -139,6 +166,18 @@
        memory for this session only — see server/multi-user.md. -->
   <section id="auth" hidden>
     <div class="muted">Sign in to this host, or pick a nickname to register.</div>
+    <div id="auth-note">
+      <p><strong>Your passphrase is the key.</strong> It is stretched with
+        Argon2id and used to unwrap the master key that signs your records
+        and decrypts your account on this server. It is sent once over TLS
+        to unlock the session and is never stored — pick something long,
+        and reuse it nowhere.</p>
+      <p><strong>No email, so no email recovery.</strong> Registering takes a
+        nickname and a passphrase, nothing else. There is no confirmation
+        link and no "reset password": this host cannot email you. Forget the
+        passphrase and the one-time <em>recovery code</em> shown right after
+        you register is the only way back — without it the account is gone.</p>
+    </div>
     <p><input id="auth-nick" placeholder="Nickname — at least 8 characters"
        autocomplete="username" autocapitalize="none" spellcheck="false"></p>
     <p><input id="auth-secret" type="password" placeholder="Passphrase"
@@ -152,9 +191,21 @@
   <p class="muted" id="boot-error" hidden></p>
 
   <div id="app" hidden>
+
+  <nav id="topnav">
+    <button type="button" data-page="identity" class="active">Identity</button>
+    <button type="button" data-page="profile">Profile</button>
+    <button type="button" data-page="contracts">Contracts</button>
+    <button type="button" data-page="contacts">Contacts</button>
+    <button type="button" data-page="mail">Mail</button>
+    <button type="button" data-page="security" id="nav-security" hidden>Security</button>
+  </nav>
+
+  <!-- ===================== IDENTITY ===================== -->
+  <div class="page" data-page="identity">
   <section>
     <div class="muted">Your invite link — post it anywhere your work history already lives,
-      or let someone scan it.</div>
+      or let someone scan it. Tap the code to enlarge it.</div>
     <!-- Filled from the identity command; the SVG is built in Rust
          (qw_client_core::invite_qr_svg) because this page has no bundler
          and so no QR library. Empty until then rather than a placeholder
@@ -163,26 +214,65 @@
     <p class="muted" id="qr-caption" hidden>Scanning this opens the invite page:
       one tap to install the app, one to be introduced.</p>
     <p><code id="link">…</code></p>
-    <button id="copy">Copy</button>
+    <button id="copy">
+      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"
+           stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect x="9" y="9" width="13" height="13" rx="2"></rect>
+        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+      </svg>Copy
+    </button>
     <p class="muted" id="copy-status"></p>
   </section>
 
   <section>
-    <div class="muted">Follow someone's link</div>
-    <p><input id="follow-input" placeholder="https://knownby.work/i/npub1…" spellcheck="false"
-              autocapitalize="none" autocorrect="off" inputmode="url"></p>
-    <button id="follow">Follow</button>
-    <p class="muted" id="follow-status"></p>
+    <div class="muted">Your skills. Badges are the evidence: a review, or
+      contracts a counterparty countersigned.</div>
+    <ul class="skills" id="skills"></ul>
+    <p class="muted" id="skills-empty">Nothing yet. Publish a skill, or complete
+      a contract and it appears here on its own.</p>
   </section>
+  </div>
 
+  <!-- ===================== PROFILE ===================== -->
+  <div class="page" data-page="profile" hidden>
+  <section>
+    <div class="muted">Your profile — the skills a referral query matches
+      you on. Published tags are <strong>public</strong>: that is how relays
+      route a question to you. There is no half-public tag; one you do not
+      publish is simply unreachable.</div>
+    <p class="muted" id="profile-current"></p>
+    <p><input id="profile-name" placeholder="Display name (optional)"
+              autocapitalize="words" spellcheck="false" maxlength="80"></p>
+    <div class="row">
+      <input id="profile-tag" list="taxonomy" placeholder="Add a skill — pick or type"
+             autocapitalize="none" autocorrect="off" spellcheck="false">
+      <button id="profile-add" type="button">Add</button>
+    </div>
+    <datalist id="taxonomy"></datalist>
+    <ul class="chips" id="profile-chips"></ul>
+    <button id="profile-save">Save &amp; publish</button>
+    <p class="muted" id="profile-status"></p>
+    <p class="muted">Remove every tag and Save is refused — an empty profile is
+      not a profile, it is being unroutable. Remove tags one at a time above,
+      or publish a replacement.</p>
+  </section>
+  </div>
+
+  <!-- ===================== CONTRACTS ===================== -->
+  <div class="page" data-page="contracts" hidden>
   <section>
     <div class="muted">Contracts. An invite usually exists <strong>because</strong>
-      of an upcoming one — follow a link above, then propose it here. Each
+      of an upcoming one — follow a link on Contacts, then propose it here. Each
       round is a full set of terms: a counter <strong>replaces</strong> them,
       it does not edit them. Only the worker's signed Accept ends the
       exchange; walking away is just silence.</div>
     <ul class="negs" id="negs"></ul>
     <p class="muted" id="negs-empty">No proposals yet.</p>
+    <p class="muted" id="negs-hidden-note" hidden>
+      <label><input type="checkbox" id="contracts-show-hidden">
+        show <span id="contracts-hidden-count">0</span> hidden</label>
+      — hiding is local to this client; a signed contract cannot be deleted
+    </p>
     <details id="propose-box">
       <summary id="propose-summary">New proposal</summary>
       <p><input id="neg-party" placeholder="Counterparty npub or hex"
@@ -204,45 +294,16 @@
       <p class="muted" id="neg-status"></p>
     </details>
   </section>
+  </div>
 
+  <!-- ===================== CONTACTS ===================== -->
+  <div class="page" data-page="contacts" hidden>
   <section>
-    <div class="muted">Your profile — the skills a referral query matches
-      you on. Published tags are <strong>public</strong>: that is how relays
-      route a question to you. There is no half-public tag; one you do not
-      publish is simply unreachable.</div>
-    <p><input id="profile-name" placeholder="Display name (optional)"
-              autocapitalize="words" spellcheck="false" maxlength="80"></p>
-    <div class="row">
-      <input id="profile-tag" list="taxonomy" placeholder="Add a skill — pick or type"
-             autocapitalize="none" autocorrect="off" spellcheck="false">
-      <button id="profile-add" type="button">Add</button>
-    </div>
-    <datalist id="taxonomy"></datalist>
-    <ul class="chips" id="profile-chips"></ul>
-    <button id="profile-save">Save &amp; publish</button>
-    <p class="muted" id="profile-status"></p>
-  </section>
-
-  <section>
-    <div class="muted">Your skills. Badges are the evidence: a review, or
-      contracts a counterparty countersigned.</div>
-    <ul class="skills" id="skills"></ul>
-    <p class="muted" id="skills-empty">Nothing yet. Publish a skill, or complete
-      a contract and it appears here on its own.</p>
-  </section>
-
-  <section>
-    <div class="muted">Find someone by skill. The question walks your
-      contacts, then theirs — up to 3 hops — toward whoever has done that
-      kind of work. Your own contacts see you asked; run <strong>Sync</strong>
-      to send it and again to collect what comes back.</div>
-    <div class="row">
-      <input id="find-skill" list="taxonomy" placeholder="Skill — pick or type"
-             autocapitalize="none" autocorrect="off" spellcheck="false">
-      <button id="find-go" type="button">Search</button>
-    </div>
-    <p class="muted" id="find-status"></p>
-    <ul class="skills" id="find-results"></ul>
+    <div class="muted">Follow someone's link</div>
+    <p><input id="follow-input" placeholder="https://knownby.work/i/npub1…" spellcheck="false"
+              autocapitalize="none" autocorrect="off" inputmode="url"></p>
+    <button id="follow">Follow</button>
+    <p class="muted" id="follow-status"></p>
   </section>
 
   <section>
@@ -258,16 +319,57 @@
     <ul class="skills" id="contacts"></ul>
     <p class="muted" id="contacts-empty">No contacts yet. Follow someone's
       link above.</p>
+    <p class="muted" id="contacts-hidden-note" hidden>
+      <label><input type="checkbox" id="contacts-show-hidden">
+        show <span id="contacts-hidden-count">0</span> hidden</label>
+      — hiding is local to this client; the protocol has no unfollow
+    </p>
   </section>
 
+  <section>
+    <div class="muted">Find someone by skill. The question walks your
+      contacts, then theirs — up to 3 hops — toward whoever has done that
+      kind of work. Your own contacts see you asked; <strong>Sync</strong> on
+      the Mail page to send it, and again to collect what comes back.</div>
+    <div class="row">
+      <input id="find-skill" list="taxonomy" placeholder="Skill — pick or type"
+             autocapitalize="none" autocorrect="off" spellcheck="false">
+      <button id="find-go" type="button">Search</button>
+    </div>
+    <p class="muted" id="find-status"></p>
+    <ul class="skills" id="find-results"></ul>
+  </section>
+  </div>
+
+  <!-- ===================== MAIL ===================== -->
+  <div class="page" data-page="mail" hidden>
+  <section>
+    <div class="muted">Mailbox. QW keeps no always-on connection.
+      <strong>Sync</strong> hands a coordination server what you have signed
+      and collects what it is holding for you; everything delivered is
+      verified on this device before it counts, and it never needs a login.</div>
+    <button id="sync">Sync now</button>
+    <p class="muted" id="sync-status">Not synced yet.</p>
+    <p class="muted" id="mail-tallies"></p>
+  </section>
+  <section id="signout-section" hidden>
+    <div class="muted">Signed in to this host. Signing out clears the session
+      key from server memory; your records stay.</div>
+    <button id="signout" class="ghost" type="button">Sign out</button>
+  </section>
+  </div>
+
+  <!-- ===================== SECURITY ===================== -->
+  <div class="page" data-page="security" hidden>
   <!-- Multi-user qw-web only: shown once boot() confirms a login host. On
        the Tauri shell and a single-user server the key is a file on a box
        you already trust, so there is nothing to manage here. -->
   <section id="keys-section" hidden>
-    <div class="muted">Keys for this account. Any one of them signs you in —
-      they each wrap the same master key, which never changes. Add a second
-      passphrase for another device, and keep a <strong>recovery code</strong>
-      somewhere offline: forget every other key and it is the only way back.</div>
+    <div class="muted">Passphrases for this account. Any one of them signs you
+      in — they each wrap the same master key, which never changes. Add a
+      second passphrase for another device, and keep a
+      <strong>recovery code</strong> somewhere offline: forget every other
+      passphrase and it is the only way back. There is no email reset.</div>
     <ul class="keys" id="keys"></ul>
     <div class="row">
       <input id="kek-label" placeholder="Label — e.g. laptop" autocapitalize="none"
@@ -291,15 +393,17 @@
       <p id="seed-value" hidden></p>
     </details>
   </section>
+  <p class="muted" id="security-na" hidden>On this build the identity key is a
+    file on a device you already control — there is nothing to manage here.</p>
+  </div>
 
-  <section>
-    <div class="muted">Mailbox</div>
-    <button id="sync">Sync now</button>
-    <button id="signout" class="ghost" type="button" hidden>Sign out</button>
-    <p class="muted" id="sync-status">Not synced yet.</p>
-  </section>
   </div>
   </main>
+
+  <!-- The invite QR, full-screen. Any click or Escape dismisses it. -->
+  <div id="qr-modal" hidden>
+    <div class="qr" id="qr-big"></div>
+  </div>
 
 <script type="module">
 // One RPC seam, two backends. In the Tauri shell `window.__TAURI__` is
@@ -348,6 +452,8 @@ async function showIdentity() {
     const qr = document.getElementById('qr');
     qr.innerHTML = me.invite_qr;
     qr.hidden = false;
+    // Same SVG, sized up by CSS, for the tap-to-enlarge overlay.
+    document.getElementById('qr-big').innerHTML = me.invite_qr;
     document.getElementById('qr-caption').hidden = false;
   }
 }
@@ -432,6 +538,9 @@ async function showProfile() {
   document.getElementById('profile-name').value = p.display_name || '';
   profileTags = (p.tags || []).slice();
   renderChips();
+  document.getElementById('profile-current').textContent = (p.tags && p.tags.length)
+    ? 'Published: ' + (p.display_name ? p.display_name + ' — ' : '') + p.tags.join(', ')
+    : 'Nothing published yet.';
 }
 
 function renderChips() {
@@ -507,10 +616,15 @@ async function showNegotiations() {
   const list = document.getElementById('negs');
   const empty = document.getElementById('negs-empty');
   const rows = await invoke('negotiations');
+  const showHidden = document.getElementById('contracts-show-hidden').checked;
+  const shown = rows.filter((n) => showHidden || !hiddenContracts.has(n.offer_event_id));
   list.textContent = '';
   empty.hidden = rows.length > 0;
+  const hc = rows.filter((n) => hiddenContracts.has(n.offer_event_id)).length;
+  document.getElementById('contracts-hidden-count').textContent = hc;
+  document.getElementById('negs-hidden-note').hidden = hc === 0;
 
-  for (const n of rows) {
+  for (const n of shown) {
     const li = document.createElement('li');
 
     const line = document.createElement('div');
@@ -590,7 +704,35 @@ async function showNegotiations() {
     ann.textContent = 'Annotate';
     ann.onclick = () => annotateOffer(n.offer_event_id);
     actions.appendChild(ann);
+
+    // View: reveal the underlying record's ids (the summary truncates
+    // them). Hide: local-only filter — see the note under the list.
+    const detail = document.createElement('div');
+    detail.className = 'muted row-detail';
+    detail.hidden = true;
+    detail.textContent =
+      `counterparty ${n.counterparty_pubkey} · offer ${n.offer_event_id} · head ${n.head_event_id}`;
+    const view = document.createElement('button');
+    view.type = 'button';
+    view.className = 'ghost';
+    view.textContent = 'View';
+    view.onclick = () => { detail.hidden = !detail.hidden; };
+    actions.appendChild(view);
+
+    const hide = document.createElement('button');
+    hide.type = 'button';
+    hide.className = 'ghost';
+    hide.textContent = hiddenContracts.has(n.offer_event_id) ? 'Unhide' : 'Hide';
+    hide.onclick = () => {
+      if (hiddenContracts.has(n.offer_event_id)) hiddenContracts.delete(n.offer_event_id);
+      else hiddenContracts.add(n.offer_event_id);
+      saveHidden(HIDDEN_CONTRACTS_KEY, hiddenContracts);
+      showNegotiations();
+    };
+    actions.appendChild(hide);
+
     li.appendChild(actions);
+    li.appendChild(detail);
     list.appendChild(li);
   }
 }
@@ -806,6 +948,8 @@ document.getElementById('sync').onclick = async () => {
       // and seeing it stay put after a sync is how you notice nothing landed.
       `. ${r.held} record${r.held === 1 ? '' : 's'} held.` +
       (r.errors.length ? ` — ${r.errors.join('; ')}` : '');
+    document.getElementById('mail-tallies').textContent =
+      `Outbox: ${r.still_queued} waiting to send. Ledger: ${r.held} record${r.held === 1 ? '' : 's'} held.`;
     // A sync can deliver a countersigned completion, which changes what is
     // earned — so re-read it rather than leaving a stale list on screen.
     await showIdentity();
@@ -863,12 +1007,64 @@ function renderPeople(el, people, extra) {
 async function showContacts() {
   try {
     const cs = await invoke('contacts');
+    const showHidden = document.getElementById('contacts-show-hidden').checked;
+    const shown = cs.filter((c) => showHidden || !hiddenPeople.has(c.pubkey));
     document.getElementById('contacts-empty').hidden = cs.length > 0;
-    renderPeople(document.getElementById('contacts'), cs);
+    renderPeople(document.getElementById('contacts'), shown, contactExtra);
+    const hp = cs.filter((c) => hiddenPeople.has(c.pubkey)).length;
+    document.getElementById('contacts-hidden-count').textContent = hp;
+    document.getElementById('contacts-hidden-note').hidden = hp === 0;
     const np = await invoke('net_position');
     document.getElementById('net-position').textContent =
       np ? `Your net position across everyone: ${np > 0 ? '+' : ''}${np.toFixed(1)} Quants.` : '';
   } catch { /* not signed in yet */ }
+}
+
+// Per-contact controls appended by renderPeople. View pulls their held
+// profile (name + tags) if this client has one — the referral answer or a
+// sync could have carried it. Hide is the local-only filter.
+function contactExtra(li, p) {
+  const bar = document.createElement('div');
+  bar.className = 'neg-actions';
+
+  const detail = document.createElement('div');
+  detail.className = 'muted row-detail';
+  detail.hidden = true;
+  detail.textContent = p.npub || p.pubkey;
+
+  const view = document.createElement('button');
+  view.type = 'button';
+  view.className = 'ghost';
+  view.textContent = 'View';
+  view.onclick = async () => {
+    detail.hidden = !detail.hidden;
+    if (detail.hidden || detail.dataset.loaded) return;
+    detail.dataset.loaded = '1';
+    try {
+      const prof = await invoke('profile_of', { pubkey: p.pubkey });
+      if (prof) {
+        detail.textContent = (p.npub || p.pubkey) +
+          (prof.display_name ? ' · ' + prof.display_name : '') +
+          (prof.tags && prof.tags.length ? ' · ' + prof.tags.join(', ') : '');
+      }
+    } catch { /* leave the npub as-is */ }
+  };
+  bar.appendChild(view);
+
+  const hide = document.createElement('button');
+  hide.type = 'button';
+  hide.className = 'ghost';
+  hide.textContent = hiddenPeople.has(p.pubkey) ? 'Unhide' : 'Hide';
+  hide.onclick = () => {
+    if (hiddenPeople.has(p.pubkey)) hiddenPeople.delete(p.pubkey);
+    else hiddenPeople.add(p.pubkey);
+    saveHidden(HIDDEN_PEOPLE_KEY, hiddenPeople);
+    showContacts();
+  };
+  bar.appendChild(hide);
+
+  li.appendChild(bar);
+  li.appendChild(detail);
 }
 
 async function refreshFindResults() {
@@ -939,6 +1135,7 @@ async function showKeys() {
     list.appendChild(li);
   }
   document.getElementById('keys-section').hidden = false;
+  document.getElementById('nav-security').hidden = false;
 }
 
 async function removeKey(tag) {
@@ -976,6 +1173,9 @@ document.getElementById('kek-add').onclick = async () => {
 // code in the accent box and pulls the section into view — it is shown
 // once and never comes back from the server.
 function revealRecoveryCode(code, message) {
+  // The code lives in the Security page now, so make sure that page is the
+  // one on screen before pointing the user at it.
+  showPage('security');
   const box = document.getElementById('recovery-code');
   box.textContent = code;
   box.hidden = false;
@@ -1010,6 +1210,57 @@ document.getElementById('seed-reveal').onclick = async () => {
     status.textContent = String(e);
   }
 };
+
+// --- top navigation between pages ----------------------------------
+// The app is one HTML file; each "page" is a <div class="page"
+// data-page="…"> shown alone. The last one visited is remembered so a
+// reload lands where you were.
+
+const PAGES = ['identity', 'profile', 'contracts', 'contacts', 'mail', 'security'];
+
+function showPage(name) {
+  if (!PAGES.includes(name)) name = 'identity';
+  for (const el of document.querySelectorAll('.page')) {
+    el.hidden = el.dataset.page !== name;
+  }
+  for (const b of document.querySelectorAll('#topnav button')) {
+    b.classList.toggle('active', b.dataset.page === name);
+  }
+  try { localStorage.setItem('qw.page', name); } catch { /* private mode */ }
+}
+
+for (const b of document.querySelectorAll('#topnav button')) {
+  b.addEventListener('click', () => showPage(b.dataset.page));
+}
+
+// --- the invite QR, tap to enlarge --------------------------------
+const qrModal = document.getElementById('qr-modal');
+document.getElementById('qr').addEventListener('click', () => {
+  if (me && me.invite_qr) qrModal.hidden = false;
+});
+qrModal.addEventListener('click', () => { qrModal.hidden = true; });
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') qrModal.hidden = true;
+});
+
+// --- locally hidden contracts / contacts --------------------------
+// The protocol has no delete for a signed contract and no unfollow
+// edge, so "remove" here is a client-side filter kept in localStorage.
+// It never touches a signed record or the server.
+function loadHidden(key) {
+  try { return new Set(JSON.parse(localStorage.getItem(key) || '[]')); }
+  catch { return new Set(); }
+}
+function saveHidden(key, set) {
+  try { localStorage.setItem(key, JSON.stringify([...set])); }
+  catch { /* private mode — the filter just will not persist */ }
+}
+const HIDDEN_CONTRACTS_KEY = 'qw.hidden.contracts';
+const HIDDEN_PEOPLE_KEY = 'qw.hidden.people';
+const hiddenContracts = loadHidden(HIDDEN_CONTRACTS_KEY);
+const hiddenPeople = loadHidden(HIDDEN_PEOPLE_KEY);
+document.getElementById('contracts-show-hidden').addEventListener('change', showNegotiations);
+document.getElementById('contacts-show-hidden').addEventListener('change', showContacts);
 
 // --- sign in / register (multi-user qw-web only) --------------------
 //
@@ -1055,7 +1306,14 @@ async function boot() {
     if (multiUser) await showKeys();
     document.getElementById('auth').hidden = true;
     document.getElementById('app').hidden = false;
-    document.getElementById('signout').hidden = !multiUser;
+    document.getElementById('signout-section').hidden = !multiUser;
+    document.getElementById('security-na').hidden = multiUser;
+    // Land on the last page visited; fall back to Identity, and never open
+    // Security when there is nothing to manage.
+    let start = 'identity';
+    try { start = localStorage.getItem('qw.page') || 'identity'; } catch { /* private mode */ }
+    if (start === 'security' && !multiUser) start = 'identity';
+    showPage(start);
   } catch (e) {
     if (isWeb && lastHttpStatus === 401) {
       multiUser = true;
