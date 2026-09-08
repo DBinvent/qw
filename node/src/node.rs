@@ -5,13 +5,21 @@
 
 use std::collections::{HashMap, HashSet};
 
+use qw_protocol::events::kinds::{
+    broadcast, hop_rating, Broadcast, BroadcastKind, HopRating, HopScore, KIND_BROADCAST,
+    KIND_HOP_RATING,
+};
 use qw_protocol::events::{
-    p_tag, skill_answer, skill_query, Event, SkillAnswer as SkillAnswerContent,
+    p_tag, skill_answer, skill_query, tag_domain, Event, SkillAnswer as SkillAnswerContent,
     SkillQuery as SkillQueryContent,
 };
 use qw_protocol::identity::Identity;
 use qw_protocol::trust::earned_skill_tags;
 
+use crate::broadcast::{
+    evaluate_relay, BroadcastDelivery, BroadcastOutcome, HopRatingCache, PropagationConfig,
+    RelayAdvice,
+};
 use crate::contact::{Contact, ContactPolicy};
 use crate::routing::select_forward_targets;
 #[cfg(test)]
@@ -70,6 +78,22 @@ struct RelayArgs<'a> {
     exclude_from_forward: Option<&'a str>,
 }
 
+/// `sector/domain` of a broadcast's first `["t"]` tag, or `""` when it
+/// carries none (a `news` item).
+fn broadcast_domain(event: &Event) -> String {
+    match event.tag_values("t").next() {
+        Some(tag) => {
+            let (sector, domain) = tag_domain(tag);
+            if domain.is_empty() {
+                String::new()
+            } else {
+                format!("{sector}/{domain}")
+            }
+        }
+        None => String::new(),
+    }
+}
+
 pub struct Node {
     identity: Identity,
     contacts: HashMap<String, Contact>,
@@ -90,6 +114,17 @@ pub struct Node {
     /// Bounds propagation on a cyclic contact graph; see NIP-QW06's scope
     /// note on multi-path reinforcement being a follow-up, not this.
     seen: HashSet<String>,
+    /// Broadcast envelope ids already handled (NIP-QW14's MSGID dedup).
+    seen_broadcasts: HashSet<String>,
+    /// This node's own signed hop ratings, cached per `(originator,
+    /// domain)` and re-attached to every broadcast it relays from that
+    /// originator until each expires (NIP-QW14 §2).
+    hop_ratings: HopRatingCache,
+    /// Per-message-type propagation policy — stock defaults until edited.
+    propagation: PropagationConfig,
+    /// Relays of one broadcast type to one contact, this day — against
+    /// `PropagationPolicy.rate_per_day` (NIP-QW14 §5 step 6).
+    broadcast_rate: HashMap<(String, &'static str), (u64, u32)>,
 }
 
 impl Node {
@@ -102,7 +137,16 @@ impl Node {
             own_profile: None,
             relay_table: HashMap::new(),
             seen: HashSet::new(),
+            seen_broadcasts: HashSet::new(),
+            hop_ratings: HopRatingCache::new(),
+            propagation: PropagationConfig::default(),
+            broadcast_rate: HashMap::new(),
         }
+    }
+
+    /// Edit this node's per-type propagation policy.
+    pub fn propagation_config_mut(&mut self) -> &mut PropagationConfig {
+        &mut self.propagation
     }
 
     pub fn pubkey(&self) -> String {
@@ -267,6 +311,211 @@ impl Node {
             to: state.answer_target.clone(),
             event: relayed,
         })
+    }
+
+    // --- broadcast propagation (NIP-QW14) --------------------------------
+
+    /// Originate a broadcast. No hop rating is attached — hop 1 (a direct
+    /// contact) makes the first one. `routing_tags` seed the `["t"]` tags
+    /// and the domain; empty is fine for `news`.
+    pub fn originate_broadcast(
+        &mut self,
+        kind: BroadcastKind,
+        body: serde_json::Value,
+        routing_tags: &[String],
+        expires_at: u64,
+        now: u64,
+    ) -> BroadcastOutcome {
+        let envelope = Broadcast { kind, body, expires_at };
+        let event = broadcast(&self.pubkey(), &envelope, routing_tags).sign(&self.identity);
+        self.seen_broadcasts.insert(event.id.clone());
+
+        let policy = self.propagation.for_kind(kind);
+        let me = self.pubkey();
+        let mut exclude: HashSet<&str> = HashSet::new();
+        exclude.insert(me.as_str());
+        let targets = self.broadcast_targets(
+            routing_tags.first().map(String::as_str),
+            &exclude,
+            policy.fanout as usize,
+        );
+
+        let mut outcome = BroadcastOutcome {
+            held: Some(event.clone()),
+            ..Default::default()
+        };
+        for to in targets {
+            if !self.allow_broadcast(&to, kind, now, policy.rate_per_day) {
+                continue;
+            }
+            outcome.deliveries.push(BroadcastDelivery {
+                to,
+                envelope: event.clone(),
+                ratings: Vec::new(),
+                path: vec![me.clone()],
+            });
+        }
+        outcome
+    }
+
+    /// Receive a broadcast from a contact. Surfaces it locally regardless;
+    /// forwards it only if the folded hop-rating chain clears this node's
+    /// policy for the message type (NIP-QW14 §5). `our_trust` returns this
+    /// node's NIP-QW13 score of a pubkey, or `None` for unknown-risk.
+    pub fn receive_broadcast(
+        &mut self,
+        from: &str,
+        envelope_event: &Event,
+        incoming_ratings: &[Event],
+        incoming_path: &[String],
+        now: u64,
+        our_trust: &dyn Fn(&str) -> Option<f64>,
+    ) -> BroadcastOutcome {
+        let mut outcome = BroadcastOutcome::default();
+        if envelope_event.verify().is_err() || envelope_event.kind != KIND_BROADCAST {
+            return outcome;
+        }
+        let Ok(envelope) = serde_json::from_str::<Broadcast>(&envelope_event.content) else {
+            return outcome;
+        };
+        if !self.contacts.contains_key(from) {
+            return outcome;
+        }
+        if !self.seen_broadcasts.insert(envelope_event.id.clone()) {
+            return outcome;
+        }
+        outcome.held = Some(envelope_event.clone());
+
+        let policy = self.propagation.for_kind(envelope.kind);
+        let originator = envelope_event.pubkey.clone();
+        let domain = broadcast_domain(envelope_event);
+        let ttl = policy.hop_rating_ttl_secs;
+
+        // our own hop rating of the originator, computed once and cached
+        let our_rating_event = match self.hop_ratings.valid(&originator, &domain, now).cloned() {
+            Some(ev) => ev,
+            None => {
+                let score = match our_trust(&originator) {
+                    Some(s) => HopScore::Score(s),
+                    None => HopScore::UnknownRisk,
+                };
+                let rating = HopRating {
+                    subject_pubkey: originator.clone(),
+                    domain: domain.clone(),
+                    score,
+                    computed_at: now,
+                    valid_until: now + ttl,
+                };
+                let ev = hop_rating(&self.pubkey(), &rating).sign(&self.identity);
+                self.hop_ratings
+                    .store(&originator, &domain, ev.clone(), now + ttl);
+                ev
+            }
+        };
+
+        let mut all_ratings = incoming_ratings.to_vec();
+        all_ratings.push(our_rating_event);
+
+        let mut rating_map: HashMap<String, HopRating> = HashMap::new();
+        for ev in &all_ratings {
+            if ev.kind != KIND_HOP_RATING || ev.verify().is_err() {
+                continue;
+            }
+            let Ok(r) = serde_json::from_str::<HopRating>(&ev.content) else {
+                continue;
+            };
+            if r.subject_pubkey == originator && r.domain == domain && r.is_valid_at(now) {
+                rating_map.insert(ev.pubkey.clone(), r);
+            }
+        }
+
+        let me = self.pubkey();
+        // the path as it would be if this node forwards — its own rating is
+        // part of the decision (NIP-QW14 §5 step 4).
+        let eval_path: Vec<String> = {
+            let mut p = incoming_path.to_vec();
+            p.push(me.clone());
+            p
+        };
+        let advice = evaluate_relay(
+            envelope_event.created_at,
+            envelope.expires_at,
+            envelope_event.content.len(),
+            &eval_path,
+            &rating_map,
+            our_trust,
+            &me,
+            &policy,
+            now,
+        );
+
+        if let RelayAdvice::Relay { fanout } = advice {
+            let new_path = eval_path;
+
+            let mut exclude: HashSet<&str> = incoming_path.iter().map(String::as_str).collect();
+            exclude.insert(from);
+            exclude.insert(me.as_str());
+            let skill_tag = envelope_event
+                .tag_values("t")
+                .next()
+                .map(|s| s.to_string());
+            let targets =
+                self.broadcast_targets(skill_tag.as_deref(), &exclude, fanout as usize);
+
+            for to in targets {
+                if !self.allow_broadcast(&to, envelope.kind, now, policy.rate_per_day) {
+                    continue;
+                }
+                outcome.deliveries.push(BroadcastDelivery {
+                    to,
+                    envelope: envelope_event.clone(),
+                    ratings: all_ratings.clone(),
+                    path: new_path.clone(),
+                });
+            }
+        }
+        outcome
+    }
+
+    /// Fan-out target selection for a broadcast: greedy tag-similar
+    /// (NIP-QW06) when the payload has a routing tag, otherwise the first
+    /// `cap` contacts (a `news` broadcast is domain-agnostic).
+    fn broadcast_targets(
+        &self,
+        skill_tag: Option<&str>,
+        exclude: &HashSet<&str>,
+        cap: usize,
+    ) -> Vec<String> {
+        let candidates = self
+            .contacts
+            .values()
+            .filter(|c| !exclude.contains(c.pubkey.as_str()));
+        let picked: Vec<String> = match skill_tag {
+            Some(tag) => select_forward_targets(candidates, tag)
+                .into_iter()
+                .map(|c| c.pubkey.clone())
+                .collect(),
+            None => candidates.take(cap).map(|c| c.pubkey.clone()).collect(),
+        };
+        picked.into_iter().take(cap).collect()
+    }
+
+    /// One relay of `kind` to `to` this day, against `cap`
+    /// (`rate_per_day`). `false` (and no count) once the day is full.
+    fn allow_broadcast(&mut self, to: &str, kind: BroadcastKind, now: u64, cap: u32) -> bool {
+        let day = now / 86_400;
+        let slot = self
+            .broadcast_rate
+            .entry((to.to_string(), kind.as_str()))
+            .or_insert((day, 0));
+        if slot.0 != day {
+            *slot = (day, 0);
+        }
+        if slot.1 >= cap {
+            return false;
+        }
+        slot.1 += 1;
+        true
     }
 
     fn relay_for(&mut self, args: RelayArgs) -> RelayOutcome {
@@ -447,6 +696,7 @@ mod tests {
                     "it/backend/languages#rust".to_string(),
                     "it/backend/languages#go".to_string(),
                 ],
+                ..Default::default()
             },
         )
         .sign(&responder_id);
@@ -662,5 +912,146 @@ mod tests {
 
         node.refresh_earned_skill_tags(&[]);
         assert!(node.own_earned_skill_tags.is_empty());
+    }
+
+    // --- broadcast (NIP-QW14) ---
+
+    #[test]
+    fn originating_a_broadcast_fans_out_with_no_hop_rating_yet() {
+        let mut origin = Node::new(Identity::generate());
+        let mut a = Node::new(Identity::generate());
+        let mut b = Node::new(Identity::generate());
+        linked(&mut origin, &mut a);
+        linked(&mut origin, &mut b);
+
+        let out = origin.originate_broadcast(
+            BroadcastKind::Demand,
+            serde_json::json!({ "terms": "need a rust dev" }),
+            &["it/backend/languages#rust".to_string()],
+            9_999_999_999,
+            1_000,
+        );
+        assert!(out.held.is_some());
+        assert_eq!(out.deliveries.len(), 2);
+        assert!(out.deliveries.iter().all(|d| d.ratings.is_empty()));
+        assert!(out.deliveries.iter().all(|d| d.path == vec![origin.pubkey()]));
+    }
+
+    #[test]
+    fn a_hop_attaches_its_rating_and_relays_when_the_score_clears_the_floor() {
+        let origin = Identity::generate();
+        let mut hop = Node::new(Identity::generate());
+        let mut downstream = Node::new(Identity::generate());
+        // hop knows the originator (as a contact) and one onward peer
+        hop.add_contact(Contact::new(origin.nostr_pubkey_hex(), ContactPolicy::open()));
+        linked(&mut hop, &mut downstream);
+
+        let envelope = broadcast(
+            &origin.nostr_pubkey_hex(),
+            &Broadcast {
+                kind: BroadcastKind::Demand, // floor 0.9
+                body: serde_json::json!({ "terms": "x" }),
+                expires_at: 9_999_999_999,
+            },
+            &["it/backend/languages#rust".to_string()],
+        )
+        .sign(&origin);
+
+        let trust = |_: &str| Some(1.0);
+        let out = hop.receive_broadcast(
+            &origin.nostr_pubkey_hex(),
+            &envelope,
+            &[],
+            &[origin.nostr_pubkey_hex()],
+            1_000,
+            &trust,
+        );
+
+        assert!(out.held.is_some(), "surfaced locally");
+        assert_eq!(out.deliveries.len(), 1, "one onward peer");
+        let d = &out.deliveries[0];
+        assert_eq!(d.to, downstream.pubkey());
+        assert_eq!(d.path, vec![origin.nostr_pubkey_hex(), hop.pubkey()]);
+        assert_eq!(d.ratings.len(), 1, "hop's own rating is attached");
+        let r: HopRating = serde_json::from_str(&d.ratings[0].content).unwrap();
+        assert_eq!(r.subject_pubkey, origin.nostr_pubkey_hex());
+        assert_eq!(r.domain, "it/backend");
+        assert_eq!(r.score, HopScore::Score(1.0));
+
+        // second identical envelope from the origin: the rating is served
+        // from cache, not recomputed (same signed event id)
+        let envelope2 = broadcast(
+            &origin.nostr_pubkey_hex(),
+            &Broadcast {
+                kind: BroadcastKind::Demand,
+                body: serde_json::json!({ "terms": "y" }),
+                expires_at: 9_999_999_999,
+            },
+            &["it/backend/languages#rust".to_string()],
+        )
+        .sign(&origin);
+        let out2 = hop.receive_broadcast(
+            &origin.nostr_pubkey_hex(),
+            &envelope2,
+            &[],
+            &[origin.nostr_pubkey_hex()],
+            2_000,
+            &trust,
+        );
+        assert_eq!(out2.deliveries[0].ratings[0].id, d.ratings[0].id);
+    }
+
+    #[test]
+    fn an_unknown_risk_originator_is_held_not_relayed() {
+        let origin = Identity::generate();
+        let mut hop = Node::new(Identity::generate());
+        let mut downstream = Node::new(Identity::generate());
+        hop.add_contact(Contact::new(origin.nostr_pubkey_hex(), ContactPolicy::open()));
+        linked(&mut hop, &mut downstream);
+
+        let envelope = broadcast(
+            &origin.nostr_pubkey_hex(),
+            &Broadcast {
+                kind: BroadcastKind::Review, // floor 1.1
+                body: serde_json::json!({ "body": "solid work" }),
+                expires_at: 9_999_999_999,
+            },
+            &["it/backend/languages#rust".to_string()],
+        )
+        .sign(&origin);
+
+        let no_trust = |_: &str| None;
+        let out = hop.receive_broadcast(
+            &origin.nostr_pubkey_hex(),
+            &envelope,
+            &[],
+            &[origin.nostr_pubkey_hex()],
+            1_000,
+            &no_trust,
+        );
+        assert!(out.held.is_some(), "still surfaced locally");
+        assert!(out.deliveries.is_empty(), "unknown-risk stops the relay");
+    }
+
+    #[test]
+    fn a_re_seen_broadcast_is_ignored() {
+        let origin = Identity::generate();
+        let mut hop = Node::new(Identity::generate());
+        hop.add_contact(Contact::new(origin.nostr_pubkey_hex(), ContactPolicy::open()));
+        let envelope = broadcast(
+            &origin.nostr_pubkey_hex(),
+            &Broadcast {
+                kind: BroadcastKind::News,
+                body: serde_json::json!({ "title": "t", "text": "x" }),
+                expires_at: 9_999_999_999,
+            },
+            &[],
+        )
+        .sign(&origin);
+        let trust = |_: &str| Some(1.0);
+        let first = hop.receive_broadcast(&origin.nostr_pubkey_hex(), &envelope, &[], &[origin.nostr_pubkey_hex()], 1, &trust);
+        assert!(first.held.is_some());
+        let again = hop.receive_broadcast(&origin.nostr_pubkey_hex(), &envelope, &[], &[origin.nostr_pubkey_hex()], 2, &trust);
+        assert!(again.held.is_none() && again.deliveries.is_empty());
     }
 }

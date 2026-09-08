@@ -69,6 +69,7 @@ mod tests {
         let profile = ProfileSkillTags {
             display_name: None,
             skill_tags: vec![],
+            ..Default::default()
         };
         let unsigned = profile_skill_tags(&identity.nostr_pubkey_hex(), 0, &profile);
         UnsignedEvent::with_created_at(

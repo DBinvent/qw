@@ -61,8 +61,16 @@ ReputationConfig {
       rating_weight:    0.0..1, // how much the 0–5 counterparty rating moves the signal
       completion_weight:0.0..1, // how much a pass/fail moves the signal
       quant_weight:     0.0..1, // how much the contract's Quant size moves the signal
+      side_settled_factor: 0.0..1, // a contract settled off-system (NIP-QW01 kind 9006,
+                               //   no credit issuance) has its whole per-contract
+                               //   signal multiplied by this. Default 0.6 — below a
+                               //   credit-backed contract, above a commit-analysis tag.
       recency_halflife: secs,   // exponential decay on contract age
       audit_weight:     0.0..1, // how much a trusted auditor's opinion moves it
+      mf2_weight:       0.0..1, // "mutual of friends": how much a direct contact's
+                               //   judgment of a third party I *also* have a read on
+                               //   moves my score of the contact. §2b. Default 0.1
+                               //   (small); the term is capped at ±0.3.
     }
   },
 
@@ -109,6 +117,14 @@ raw_signal *= 2 ^ ( -age / recency_halflife )                        //  recent 
   unfavourable audit opinion (NIP-QW04, kind 9030 `audit_opinion`) is a
   fail, and its `raw_signal` drops below `1.0`. The user's worked example
   — *"the person who failed a job … score is 0.9"* — is this term.
+- **Side-settled** — a contract that carries a NIP-QW01 kind 9006 (side
+  settlement) and **no** matching kind 9010 credit issuance keeps its
+  `rating` and `completion` terms, contributes **no** `quant_weight` term
+  (there is no amount), and has its whole `raw_signal` multiplied by
+  `side_settled_factor`. This is the evidence class between a credit-backed
+  contract and a commit-analysis tag (NIP-QW03). A contract with both a
+  9006 and a 9010 is scored from the 9010 (credit-backed) and the conflict
+  is surfaced.
 - **Audit opinions** are folded in at `audit_weight`, but **only from an
   auditor the viewer themselves scores `> tolerance`** in the relevant
   domain, and weighted by that auditor's own score (`abstract.md`: "weight
@@ -116,7 +132,66 @@ raw_signal *= 2 ^ ( -age / recency_halflife )                        //  recent 
   does not trust is ignored, not inverted.
 
 A subject's **domain score** is the recency-weighted mean of the
-`raw_signal`s of their contracts *resolved into that domain* by §3.
+`raw_signal`s of their contracts *resolved into that domain* by §3, plus
+the second-order term below.
+
+### 2b. Second-order judgment concordance ("mutual of friends", MF2)
+
+A direct contact `A`'s **domain score** is nudged by how well `A`'s
+judgments of third parties I also have a read on line up with mine — a
+friend who vouches for someone I think is bad has shown me something about
+their judgment, and a neutral acquaintance who independently distrusts the
+same person has too.
+
+The term applies **only to a direct contact** `A` (I have my own contract
+history with `A`), and draws **only on third parties `B` I distrust** in
+this domain — `my_domain_score(B, d) < 1.0`. For each such `B` that `A`
+has also expressed a domain-`d` sentiment about:
+
+```
+my_distrust(B)  = 1 − my_domain_score(B, d)         // (0..1], how far below neutral
+a_sentiment(B)  = +1  if A rated B favourably   (JobCompletion.rating ≥ 4 from A's
+                                                  own completion, a favourable
+                                                  review (NIP-QW14) or audit opinion
+                                                  (NIP-QW04) A signed)
+                  −1  if A rated B unfavourably (rating ≤ 2, unfavourable review /
+                                                  opinion)
+                   0  otherwise                  → B contributes nothing
+concordance(B)  = −a_sentiment(B)                   // A liked whom I distrust → −1
+                                                    // A distrusted whom I distrust → +1
+dist(B)         = min hops me → B in the verified graph (≥ 1)
+
+mf2(A, d) = clamp(
+    mf2_weight * Σ_B [ concordance(B) * my_distrust(B) * hop_decay^(dist(B) − 1) ],
+    −0.3, +0.3
+)
+domain_score(A, d) += mf2(A, d)
+```
+
+- `A`'s rating of `B` is read from **`A`'s own** completion / review /
+  opinion, never `B`'s — the same guard as `counterparty_rating` above.
+- The effect shrinks with `B`'s distance (`hop_decay`, shared with §4) and
+  grows with how strongly I distrust `B` (`my_distrust`).
+- It is a *nudge*: `mf2_weight` defaults small and the whole term is
+  clamped to `±0.3`, so it can shade a score, not flip it.
+- The mirror case — `A` disagreeing with me about someone I **trust** — is
+  deliberately left out: rewarding "A agrees with my *likes*" invites a
+  mutual-admiration loop, and the design only ever lets a second-order
+  signal *discount*, never inflate on agreement alone (cf. §4 `reverse`).
+
+**Worked example 1 (penalty).** I did a `backend` contract with `A` and
+rated it well. `A` then did a `backend` contract with `B` and rated `B`
+5/5. But I distrust `B` for `backend` — `my_domain_score(B, backend) =
+0.6`, `B` is 2 hops out. With `mf2_weight = 0.1`, `hop_decay = 0.5`:
+`concordance = −1`, `my_distrust = 0.4`, so `mf2(A) = 0.1 × (−1) × 0.4 ×
+0.5 = −0.02`. `A`'s backend score drops by `0.02` — `A` liked someone I
+don't rate, and it costs `A` a little.
+
+**Worked example 2 (reward).** I have a `backend` contract with `A` and
+rate it neutrally (`domain_score(A, backend) ≈ 1.0`). `A` did a contract
+with `B` and rated `B` 1/5. I also distrust `B` (`0.6`, 1 hop). `mf2(A) =
+0.1 × (+1) × 0.4 × 1.0 = +0.04`. `A`'s neutral score rises to `1.04` — `A`
+independently reached the same read on `B` that I did.
 
 ## 3. Scope resolution (the taxonomy inheritance the user asked for)
 
@@ -241,6 +316,7 @@ more counterparties' filters"* — score gates how far you carry:
 | **You appear in a referral answer** (NIP-QW06, kind 9051) | the requester ranks answers by *their own* `domain_score` of each responder (§4 multi-path); low / unknown-risk responders sort last or are dropped by the requester's `tolerance`. |
 | **Your bulletin listing is surfaced** (NIP-QW11, kind 9091) | a board or a browsing client MAY hide listings whose poster the viewer scores below `tolerance` for the listing's domain — the "public gateway" layer still filters per-viewer, it just does it at browse time. |
 | **A coordination server includes you** in a chain-calculation result (NIP-QW10, kind 9090) | the server returns the path + its own `score`; the client re-derives §4 locally and applies its own `tolerance` — the server never gates, it only computes. |
+| **Your broadcast is relayed onward** (NIP-QW14, kind 9100) | a hop forwards only if the folded chain of signed hop ratings (kind 9101) for you in the payload's domain clears that hop's `min_hop_score` for the message type. This is the "per-domain score floor on relay-forward" above, spelled per type; the hop rating is cached and re-signed only every `hop_rating_ttl` days. |
 
 None of this is a protocol-level block. The record is always
 verifiable by anyone who has it; score only decides **whose client
@@ -255,10 +331,12 @@ bothers to relay, rank, or show it.**
 |---|---|---|
 | output | raw Quant magnitude of the closing edge × `hop_decay^(hops−1)`, `0..∞`, no neutral point | `1.0`-centred multiplier; `unknown-risk` is a distinct non-number |
 | per-contract signal | **credit amount only** | `(counterparty rating, pass/fail, quant size, recency, trusted-auditor opinion)` — `rating` and audit opinions do **not** feed the score today |
+| settlement | credit issuance or nothing; a contract with no 9010 does not form a trust edge at all | a NIP-QW01 kind 9006 side settlement makes the contract count without a 9010, scored at `side_settled_factor` with no quant term |
 | domain match | binary `same_domain` (sector+domain prefix) | configurable inheritance matrix (`parent_of` / `child_of` / `sibling` / `cross_sector`) |
 | per-domain config | none — one global `min_reputation` in `AdmissionPolicy` | `tolerance` + weights per `(sector/domain)` |
 | paths | **single shortest** path | all node-disjoint paths, `multipath` = `max` \| `mean` \| `sum-capped` |
 | intermediary effect | none — the score is the closing edge, decayed by hop count | each voucher's own score modulates the endpoint; optional `reverse` "contrarian" transform |
+| second-order concordance (MF2) | none — a contact's opinion of a third party never touches my score of the contact | §2b: a direct contact's judgment of someone I distrust nudges their domain score, `±0.3` clamp, `mf2_weight` |
 | balance term | separate `net_position` display, not folded into the score | `net_position` folded into `overall` at `net_position_weight` |
 | config surface | `AdmissionPolicy { min_reputation, position_limit }` (both `Option<f64>`), persisted in `SyncState` | full `ReputationConfig`, per-domain, persisted the same way |
 | visibility / broadcast | `ContactPolicy` (`relay_depth` / `accept_depth` / `categories` / `rate_limit` / `share_tags`); **no score floor** anywhere in routing, ranking, or bulletin browsing | per-domain score floors on relay-forward, answer-rank, and bulletin surfacing |
@@ -284,7 +362,10 @@ signed record; this is entirely client computation and client config.
    the auditor.
 6. **Score floors in routing / ranking / bulletin browsing** — the
    visibility half of §6, once the score is stable enough to gate on.
-7. **`reverse` / contrarian transform** — last, opt-in, for the
+7. **MF2 (§2b)** — the second-order concordance nudge. Needs (5)'s
+   opinion/review inputs and a stable per-domain read on third parties to
+   draw on; opt-in via `mf2_weight`, clamped.
+8. **`reverse` / contrarian transform** — last, opt-in, for the
    participant who explicitly wants it.
 
 Until (1) ships, a client is at the defaults, which are defined to be

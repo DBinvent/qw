@@ -199,6 +199,7 @@ mod tests {
             &ProfileSkillTags {
                 display_name: None,
                 skill_tags: vec!["it/backend/languages#rust".to_string()],
+                ..Default::default()
             },
         );
         let request = SignRequest::new("req-1", &unsigned, Some("qw-app://signed".to_string()));
@@ -218,6 +219,7 @@ mod tests {
             &ProfileSkillTags {
                 display_name: Some("vk".to_string()),
                 skill_tags: vec![],
+                ..Default::default()
             },
         );
         let request = SignRequest::new("req-1", &unsigned, None);
@@ -247,6 +249,7 @@ mod tests {
             &ProfileSkillTags {
                 display_name: None,
                 skill_tags: vec![],
+                ..Default::default()
             },
         );
         let request = SignRequest::new("req-1", &unsigned, None);
@@ -272,6 +275,7 @@ mod tests {
             &ProfileSkillTags {
                 display_name: None,
                 skill_tags: vec![],
+                ..Default::default()
             },
         );
         let request = SignRequest::new("req-1", &unsigned, None);

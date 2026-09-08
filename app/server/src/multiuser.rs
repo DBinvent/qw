@@ -1223,7 +1223,7 @@ mod tests {
             &app,
             "/api/profile_set",
             Some(&token),
-            json!({ "edit": { "display_name": "Bob", "tags": ["Rust Lang"] } }),
+            json!({ "edit": { "display_name": "Bob", "skills": [{ "tag": "Rust Lang" }] } }),
         )
         .await;
         assert_eq!(st, StatusCode::OK);
@@ -1416,7 +1416,7 @@ mod tests {
             &app,
             "/api/profile_set",
             Some(&token),
-            json!({ "edit": { "display_name": "PG", "tags": ["Rust Lang"] } }),
+            json!({ "edit": { "display_name": "PG", "skills": [{ "tag": "Rust Lang" }] } }),
         )
         .await;
         assert_eq!(st, StatusCode::OK);

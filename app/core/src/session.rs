@@ -27,8 +27,8 @@ use qw_node::node::{Delivery, FinalAnswer, Node};
 use qw_node::server_registry::{rank_servers, ServerCandidate};
 use qw_node::sync::{MailboxSync, MailboxTransport};
 use qw_protocol::events::{
-    now as unix_now, Event, Introduction, SkillAnswer, KIND_INTRODUCTION, KIND_PROFILE,
-    KIND_SKILL_ANSWER, KIND_SKILL_QUERY,
+    now as unix_now, tag_domain, Event, ExternalLink, Introduction, SkillAnswer, SkillSource,
+    KIND_INTRODUCTION, KIND_PROFILE, KIND_SKILL_ANSWER, KIND_SKILL_QUERY,
 };
 use qw_protocol::identity::Identity;
 use qw_protocol::{invite, trust};
@@ -576,13 +576,49 @@ impl Session {
         let invite_qr = invite_qr_svg(&invite_link)?;
         let events = self.history.events();
 
-        let declared: HashSet<String> = profile::current(events, &pubkey)
-            .map(|p| p.skill_tags.into_iter().collect())
+        let profile = profile::current(events, &pubkey);
+        let declared: HashSet<String> = profile
+            .as_ref()
+            .map(|p| p.skill_tags.iter().cloned().collect())
             .unwrap_or_default();
+        let levels = profile
+            .as_ref()
+            .map(|p| p.skill_levels.clone())
+            .unwrap_or_default();
+        let sources = profile
+            .as_ref()
+            .map(|p| p.skill_sources.clone())
+            .unwrap_or_default();
+        let links = profile.map(|p| p.links).unwrap_or_default();
+
+        // The badge every skill row carries: a countersigned contract beats
+        // a commit-analysis hint beats a bare self-declaration.
+        let evidence_for = |tag: &str, contracts: usize| -> String {
+            if contracts > 0 {
+                "approved_by_job".to_string()
+            } else if sources.get(tag).copied() == Some(SkillSource::CommitAnalysis) {
+                "algorithmic".to_string()
+            } else {
+                "unproven".to_string()
+            }
+        };
+        let level_for = |tag: &str| levels.get(tag).map(|l| l.as_str().to_string());
+        let group_for = |tag: &str| {
+            let (sector, domain) = tag_domain(tag);
+            if domain.is_empty() {
+                sector.to_string()
+            } else {
+                format!("{sector}/{domain}")
+            }
+        };
+
         let mut skills: Vec<SkillView> = trust::earned_skills(events, &pubkey)
             .into_iter()
             .map(|s| SkillView {
                 declared: declared.contains(&s.tag),
+                group: group_for(&s.tag),
+                level: level_for(&s.tag),
+                evidence: evidence_for(&s.tag, s.contracts),
                 tag: s.tag,
                 reviewed: None,
                 contracts: s.contracts,
@@ -592,6 +628,9 @@ impl Session {
         for tag in &declared {
             if !skills.iter().any(|s| &s.tag == tag) {
                 skills.push(SkillView {
+                    group: group_for(tag),
+                    level: level_for(tag),
+                    evidence: evidence_for(tag, 0),
                     tag: tag.clone(),
                     declared: true,
                     reviewed: None,
@@ -600,13 +639,14 @@ impl Session {
                 });
             }
         }
-        skills.sort_by(|a, b| a.tag.cmp(&b.tag));
+        skills.sort_by(|a, b| (&a.group, &a.tag).cmp(&(&b.group, &b.tag)));
 
         Ok(IdentityView {
             pubkey,
             npub,
             invite_link,
             skills,
+            links,
             invite_qr,
         })
     }
@@ -829,11 +869,15 @@ impl Session {
 
     /// The most recent profile this identity published, or an empty one.
     pub fn profile_view(&self) -> ProfileView {
-        let current = profile::current(self.history.events(), &self.pubkey_hex());
-        ProfileView {
-            display_name: current.as_ref().and_then(|p| p.display_name.clone()),
-            tags: current.map(|p| p.skill_tags).unwrap_or_default(),
-        }
+        profile::current_view(self.history.events(), &self.pubkey_hex()).unwrap_or_else(|| {
+            ProfileView {
+                display_name: None,
+                tags: vec![],
+                levels: Default::default(),
+                sources: Default::default(),
+                links: vec![],
+            }
+        })
     }
 
     /// The profile this viewer holds for some *other* pubkey — a contact's,
@@ -841,22 +885,14 @@ impl Session {
     /// `None` when none is held: the network never resolves an npub to a
     /// profile from a central directory, only from evidence in hand.
     pub fn profile_of(&self, pubkey: &str) -> Option<ProfileView> {
-        profile::current(self.history.events(), pubkey).map(|p| ProfileView {
-            display_name: p.display_name,
-            tags: p.skill_tags,
-        })
+        profile::current_view(self.history.events(), pubkey)
     }
 
     /// Resolve, sign and queue a new replaceable profile event, its
     /// `revision` one past the last this identity published. `sync_now`
     /// publishes it.
     pub fn set_profile(&mut self, edit: ProfileEdit) -> Result<String, ClientError> {
-        let event = profile::build_signed(
-            &self.identity,
-            self.history.events(),
-            edit.display_name.as_deref(),
-            &edit.tags,
-        )?;
+        let event = profile::build_signed(&self.identity, self.history.events(), &edit)?;
         self.author(event)
     }
 
@@ -934,18 +970,34 @@ pub struct IdentityView {
     /// One row per skill, whatever the evidence — not three lists. A skill
     /// is the row; the evidence is decoration on it.
     pub skills: Vec<SkillView>,
+    /// Self-asserted external-network profiles (GitHub, LinkedIn, a site).
+    /// Not evidence — a place a viewer can go to corroborate a claim by
+    /// hand until a countersigned contract does it for them (NIP-QW03 §5).
+    pub links: Vec<ExternalLink>,
     /// The invite link as a scannable SVG, built in Rust because the UI
     /// has no bundler.
     pub invite_qr: String,
 }
 
-/// A skill and its badges. Both badge fields are absent for most skills.
+/// A skill and its badges. `level`, `reviewed` and `rating` are absent for
+/// most skills; `group` and `evidence` are always set.
 #[derive(Debug, Clone, Serialize)]
 pub struct SkillView {
     pub tag: String,
+    /// The `sector/domain` this tag rolls up to — the key a shell groups
+    /// rows under, so it need not re-parse the tag.
+    pub group: String,
     /// Declared by the holder in their published profile. A skill that
     /// only shows up in contract history is `false`.
     pub declared: bool,
+    /// Holder's self-assessed level — `beginner` / `intermediate` /
+    /// `senior` / `expert`, or `None` if they stated none.
+    pub level: Option<String>,
+    /// Strongest evidence class for this skill:
+    /// `"approved_by_job"` (a countersigned contract carries the tag),
+    /// `"algorithmic"` (only commit-history analysis suggested it), or
+    /// `"unproven"` (self-declared, nothing corroborating).
+    pub evidence: String,
     /// A broker's review. Unpopulated — reviewed skills are specced and
     /// unbuilt; the field exists so the badge renderer need not change
     /// shape when they land.
@@ -1125,6 +1177,23 @@ mod tests {
         .unwrap()
     }
 
+    /// A `ProfileEdit` from a name and bare skill tags — no levels, no
+    /// links, the shape most tests want.
+    fn pe(name: Option<&str>, tags: &[&str]) -> ProfileEdit {
+        ProfileEdit {
+            display_name: name.map(str::to_string),
+            skills: tags
+                .iter()
+                .map(|t| crate::profile::SkillEdit {
+                    tag: t.to_string(),
+                    level: None,
+                    source: None,
+                })
+                .collect(),
+            links: vec![],
+        }
+    }
+
     fn terms(skill: &str, hours: f64, rate: f64, text: &str) -> TermsDraft {
         TermsDraft {
             skill_tags: vec![skill.to_string()],
@@ -1149,11 +1218,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut s = session_at(dir.path());
 
-        s.set_profile(ProfileEdit {
-            display_name: Some("Vlad".to_string()),
-            tags: vec!["Rust Lang".to_string()],
-        })
-        .unwrap();
+        s.set_profile(pe(Some("Vlad"), &["Rust Lang"])).unwrap();
 
         // A profile event carries no `p` tag, so a mailbox would never
         // return it — it has to be in the ledger the moment it is signed,
@@ -1171,11 +1236,7 @@ mod tests {
 
         // A second edit is revision 2 and supersedes the first everywhere
         // a view reads the current profile.
-        s.set_profile(ProfileEdit {
-            display_name: Some("Vlad".to_string()),
-            tags: vec!["Go Lang".to_string()],
-        })
-        .unwrap();
+        s.set_profile(pe(Some("Vlad"), &["Go Lang"])).unwrap();
         assert_eq!(s.outbox().last().unwrap().revision(), 2);
         assert_eq!(s.profile_view().tags, vec!["it/backend/languages#go"]);
         let skills = s.identity_view().unwrap().skills;
@@ -1184,6 +1245,62 @@ mod tests {
             !skills.iter().any(|sk| sk.tag == "it/backend/languages#rust"),
             "the superseded tag is gone from the declared set"
         );
+    }
+
+    #[test]
+    fn a_profile_carries_levels_links_and_a_grouped_evidence_class() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = session_at(dir.path());
+
+        s.set_profile(ProfileEdit {
+            display_name: Some("vk".into()),
+            skills: vec![
+                crate::profile::SkillEdit {
+                    tag: "Rust Lang".into(),
+                    level: Some("senior".into()),
+                    source: None,
+                },
+                crate::profile::SkillEdit {
+                    tag: "React".into(),
+                    level: None,
+                    source: Some("commit-analysis".into()),
+                },
+            ],
+            links: vec![crate::profile::LinkEdit {
+                network: "GitHub".into(),
+                url: "https://github.com/vk".into(),
+            }],
+        })
+        .unwrap();
+
+        let view = s.identity_view().unwrap();
+        assert_eq!(view.links.len(), 1);
+        assert_eq!(view.links[0].network, "github");
+
+        let rust = view
+            .skills
+            .iter()
+            .find(|sk| sk.tag == "it/backend/languages#rust")
+            .unwrap();
+        assert_eq!(rust.level.as_deref(), Some("senior"));
+        assert_eq!(rust.group, "it/backend");
+        // Declared only, no contract, no commit-analysis -> unproven.
+        assert_eq!(rust.evidence, "unproven");
+
+        let react = view
+            .skills
+            .iter()
+            .find(|sk| sk.group == "it/frontend")
+            .unwrap();
+        assert_eq!(react.level, None);
+        // Kept from a commit-analysis suggestion, still no contract.
+        assert_eq!(react.evidence, "algorithmic");
+
+        // profile_view round-trips the level map and the links.
+        let pv = s.profile_view();
+        let rust_level = pv.levels.get("it/backend/languages#rust").cloned();
+        assert_eq!(rust_level.as_deref(), Some("senior"));
+        assert_eq!(pv.links.len(), 1);
     }
 
     #[test]
@@ -1673,7 +1790,7 @@ mod tests {
         let mut b = peer_session(bdir.path(), Identity::generate());
 
         // B does Rust; A follows B.
-        b.set_profile(ProfileEdit { display_name: None, tags: vec!["Rust Lang".into()] })
+        b.set_profile(pe(None, &["Rust Lang"]))
             .unwrap();
         a.follow(&format!(
             "https://knownby.work/i/{}",
@@ -1730,11 +1847,7 @@ mod tests {
 
         // C publishes a two-skill profile with a display name — the
         // "open to view in the network" surface.
-        c.set_profile(ProfileEdit {
-            display_name: Some("Dana".into()),
-            tags: vec!["Rust Lang".into(), "Go Lang".into()],
-        })
-        .unwrap();
+        c.set_profile(pe(Some("Dana"), &["Rust Lang", "Go Lang"])).unwrap();
 
         // A follows B; B follows C. Nobody follows across the gap.
         a.follow(&format!(
@@ -1796,7 +1909,7 @@ mod tests {
     fn find_by_skill_matches_own_earned_skills() {
         let dir = tempfile::tempdir().unwrap();
         let mut s = session_at(dir.path());
-        s.set_profile(ProfileEdit { display_name: None, tags: vec!["Rust Lang".into()] })
+        s.set_profile(pe(None, &["Rust Lang"]))
             .unwrap();
         let r = s.find_by_skill("it/backend/languages#rust").unwrap();
         assert!(r.own_match.is_some());
@@ -1961,7 +2074,7 @@ mod tests {
 
         // each edits its own profile while the other is unreachable
         phone
-            .set_profile(ProfileEdit { display_name: Some("vk".into()), tags: vec!["Rust Lang".into()] })
+            .set_profile(pe(Some("vk"), &["Rust Lang"]))
             .unwrap();
         web.follow(&format!(
             "https://knownby.work/i/{}",

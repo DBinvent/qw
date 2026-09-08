@@ -241,6 +241,13 @@ pub fn t_tag(skill_tag: impl Into<String>) -> Tag {
     vec!["t".to_string(), skill_tag.into()]
 }
 
+/// A URL reference tag (`["r", <url>]`) — the Nostr convention for an
+/// external link an event points at. Used by NIP-QW03 for a profile's
+/// external-network links.
+pub fn r_tag(url: impl Into<String>) -> Tag {
+    vec!["r".to_string(), url.into()]
+}
+
 /// The `["revision", n]` tag every replaceable QW record carries. The
 /// author bumps `n` on each edit; readers order by
 /// `(revision, created_at, id)` so a stale replica's clock cannot win

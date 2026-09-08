@@ -44,6 +44,11 @@
   .skills li { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem;
                padding: .55rem 0; border-top: 1px solid #27272a; }
   .skills li:first-child { border-top: 0; }
+  /* Skills are grouped by sector/domain (NIP-QW03) — this is the header
+     row for each group, not a skill. */
+  .skills li.group-head { display: block; padding: .7rem 0 .15rem; font-size: 11px;
+               letter-spacing: .08em; text-transform: uppercase; color: #71717a; }
+  .skills li.group-head:first-child { border-top: 0; }
   .skill-tag { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 13px;
                overflow-wrap: anywhere; margin-right: auto; }
   .badge { font-size: 11px; line-height: 1; padding: .32rem .5rem; border-radius: 999px;
@@ -51,6 +56,22 @@
   /* The countersigned one is the only badge that costs someone else a
      signature, so it is the only one that gets the accent. */
   .badge.contract { border-color: #4c1d95; color: #c4b5fd; }
+  /* Evidence class per skill (NIP-QW03 §5): a job-approved tag reuses the
+     accent, a commit-analysis one gets its own blue, an unproven one stays
+     muted. Self-assessed level is a neutral pill. */
+  .badge.algo { border-color: #1e3a5f; color: #93c5fd; }
+  .badge.level { border-color: #3f3f46; color: #d4d4d8; }
+  /* External-network links: one row each, network label then URL. */
+  .links { list-style: none; margin: .25rem 0 0; padding: 0; }
+  .links li { display: flex; flex-wrap: wrap; align-items: baseline; gap: .5rem;
+              padding: .5rem 0; border-top: 1px solid #27272a; }
+  .links li:first-child { border-top: 0; }
+  .links .net { font-size: 11px; text-transform: uppercase; letter-spacing: .05em;
+                color: #a1a1aa; min-width: 5rem; }
+  .links a { color: #a78bfa; overflow-wrap: anywhere; }
+  .chip select { margin: 0; min-height: 0; padding: .1rem .2rem; font: inherit;
+                 font-size: 11px; background: #09090b; color: #c4b5fd;
+                 border: 1px solid #4c1d95; border-radius: .3rem; }
   /* Profile editor: the published tags as removable chips. Max five, per
      the taxonomy's own rule. */
   .chips { display: flex; flex-wrap: wrap; gap: .4rem; margin: .5rem 0 0; padding: 0; list-style: none; }
@@ -227,24 +248,36 @@
   </section>
 
   <section>
-    <div class="muted">Your skills. Badges are the evidence: a review, or
-      contracts a counterparty countersigned.</div>
+    <div class="muted">Your skills, grouped by field. Each row carries its
+      evidence: <span class="badge">○ unproven</span> (self-declared),
+      <span class="badge algo">⚙ algorithmic</span> (suggested from your commit
+      history) or <span class="badge contract">✓ approved by job</span> (a
+      counterparty countersigned it). A self-assessed level shows as
+      <span class="badge level">▲ senior</span>.</div>
     <ul class="skills" id="skills"></ul>
     <p class="muted" id="skills-empty">Nothing yet. Publish a skill, or complete
       a contract and it appears here on its own.</p>
+  </section>
+
+  <section id="links-section" hidden>
+    <div class="muted">Other networks where this profile can be checked — until
+      a job approves the skill for you.</div>
+    <ul class="links" id="ext-links"></ul>
   </section>
   </div>
 
   <!-- ===================== PROFILE ===================== -->
   <div class="page" data-page="profile" hidden>
   <section>
-    <div class="muted">Your skills and the <strong>score</strong> each has
-      earned — the mean rating counterparties gave the countersigned work
-      behind that tag (0–5), over how many contracts. Countersigned work is
-      the only axis that carries a number (NIP-QW03 §5): a bare claim or a
-      review adds reach, not a score. A tag with no countersigned contract
-      shows <span class="badge">unproven</span> — published and findable, but
-      nothing has scored it yet.</div>
+    <div class="muted">Your skills, grouped by field, and the
+      <strong>score</strong> each has earned — the mean rating counterparties
+      gave the countersigned work behind that tag (0–5), over how many
+      contracts. Countersigned work is the only axis that carries a number
+      (NIP-QW03 §5): a bare claim, a level or a commit-history hint adds reach,
+      not a score. Every row shows its evidence class
+      (<span class="badge">○ unproven</span> /
+      <span class="badge algo">⚙ algorithmic</span> /
+      <span class="badge contract">✓ approved by job</span>).</div>
     <ul class="skills" id="profile-scores"></ul>
     <p class="muted" id="profile-scores-empty">No skills yet — add one below,
       publish it, then complete a contract to put a score on it.</p>
@@ -253,7 +286,9 @@
   <section>
     <div class="muted">Publish the tags a referral query should match you on.
       They are <strong>public</strong> — that is how relays route a question
-      to you, and one you do not publish is simply unreachable.</div>
+      to you, and one you do not publish is simply unreachable. Set a level on
+      each if you want (beginner / intermediate / senior / expert) — it is
+      self-assessed and does not affect routing.</div>
     <p><input id="profile-name" placeholder="Display name (optional)"
               autocapitalize="words" spellcheck="false" maxlength="80"></p>
     <div class="row">
@@ -268,6 +303,23 @@
     <p class="muted">Remove every tag and Save is refused — an empty profile is
       not a profile, it is being unroutable. Remove tags one at a time above,
       or publish a replacement.</p>
+  </section>
+
+  <section>
+    <div class="muted">Links to other networks — GitHub, LinkedIn, a personal
+      site. Self-asserted, <strong>not evidence</strong>: somewhere a viewer
+      can corroborate a claim by hand until a countersigned contract does it
+      for them.</div>
+    <div class="row">
+      <input id="link-network" placeholder="Network — github, linkedin, …"
+             autocapitalize="none" autocorrect="off" spellcheck="false" maxlength="40">
+    </div>
+    <div class="row">
+      <input id="link-url" placeholder="https://…" inputmode="url"
+             autocapitalize="none" autocorrect="off" spellcheck="false">
+      <button id="link-add" type="button">Add</button>
+    </div>
+    <ul class="chips" id="link-chips"></ul>
   </section>
   </div>
 
@@ -521,6 +573,7 @@ async function showIdentity() {
   document.getElementById('link').textContent = me.invite_link;
 
   renderSkills(me.skills || []);
+  renderLinks(me.links || []);
 
   // innerHTML with app-built markup would normally be the wrong reflex.
   // Here the string is an SVG this app generated in its own process from
@@ -554,38 +607,6 @@ async function showIdentity() {
 // taxonomy today, but it arrives from signed records that other people
 // wrote, and the day one carries markup is not the day to find out this
 // took a shortcut.
-function renderSkills(skills) {
-  const list = document.getElementById('skills');
-  const empty = document.getElementById('skills-empty');
-  list.textContent = '';
-  empty.hidden = skills.length > 0;
-
-  for (const s of skills) {
-    const row = document.createElement('li');
-    const tag = document.createElement('span');
-    tag.className = 'skill-tag';
-    tag.textContent = s.tag;
-    row.appendChild(tag);
-
-    if (s.reviewed) {
-      row.appendChild(badge('reviewed · ' + s.reviewed, ''));
-    }
-    if (s.contracts > 0) {
-      // Score only when a counterparty actually rated it. Printing 0.0 for
-      // "nobody said" would read as "they said it was terrible".
-      const score = s.rating === null || s.rating === undefined
-        ? ''
-        : ' · score ' + s.rating.toFixed(1);
-      const n = s.contracts === 1 ? '1 contract' : s.contracts + ' contracts';
-      row.appendChild(badge(n + score, 'contract'));
-    }
-    if (!s.reviewed && !s.contracts && s.declared) {
-      row.appendChild(badge('mentioned', ''));
-    }
-    list.appendChild(row);
-  }
-}
-
 function badge(text, extra) {
   const el = document.createElement('span');
   el.className = extra ? 'badge ' + extra : 'badge';
@@ -593,13 +614,119 @@ function badge(text, extra) {
   return el;
 }
 
+// The three-state evidence icon every skill row carries (NIP-QW03 §5):
+// nothing but a self-claim, a commit-history hint, or a countersigned
+// contract. One glyph + word so it reads at a glance and still copies.
+function evidenceBadge(ev) {
+  if (ev === 'approved_by_job') return badge('✓ approved by job', 'contract');
+  if (ev === 'algorithmic') return badge('⚙ algorithmic', 'algo');
+  return badge('○ unproven', '');
+}
+
+function levelBadge(level) {
+  return level ? badge('▲ ' + level, 'level') : null;
+}
+
+// sector/domain -> [rows], in tag order, groups sorted. `s.group` comes
+// pre-computed from the backend so the UI never re-parses a tag.
+function groupSkills(skills) {
+  const groups = new Map();
+  for (const s of skills) {
+    const k = s.group || '—';
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(s);
+  }
+  return [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+}
+
+// Render `skills` into `list` as group-header rows interleaved with skill
+// rows built by `rowFn`. Rebuilt from scratch each call.
+function renderGrouped(list, skills, rowFn) {
+  list.textContent = '';
+  for (const [group, rows] of groupSkills(skills)) {
+    const head = document.createElement('li');
+    head.className = 'group-head';
+    head.textContent = group;
+    list.appendChild(head);
+    for (const s of rows) list.appendChild(rowFn(s));
+  }
+}
+
+// textContent throughout, never innerHTML: a skill tag is normalized
+// taxonomy today, but it arrives from signed records that other people
+// wrote, and the day one carries markup is not the day to find out this
+// took a shortcut.
+function renderSkills(skills) {
+  const list = document.getElementById('skills');
+  document.getElementById('skills-empty').hidden = skills.length > 0;
+  renderGrouped(list, skills, (s) => {
+    const row = document.createElement('li');
+    const tag = document.createElement('span');
+    tag.className = 'skill-tag';
+    tag.textContent = s.tag;
+    row.appendChild(tag);
+
+    const lvl = levelBadge(s.level);
+    if (lvl) row.appendChild(lvl);
+    if (s.reviewed) row.appendChild(badge('reviewed · ' + s.reviewed, ''));
+    if (s.contracts > 0) {
+      const score = s.rating == null ? '' : ' · score ' + s.rating.toFixed(1);
+      const n = s.contracts === 1 ? '1 contract' : s.contracts + ' contracts';
+      row.appendChild(badge(n + score, 'contract'));
+    }
+    row.appendChild(evidenceBadge(s.evidence));
+    return row;
+  });
+}
+
+// One external-link row: network label + the URL as an anchor. Anchors so
+// the target opens; `rel="noopener noreferrer"` and text only for the
+// label (a link URL is self-asserted, from a signed record someone else
+// wrote).
+function linkRow(l) {
+  const li = document.createElement('li');
+  const net = document.createElement('span');
+  net.className = 'net';
+  net.textContent = l.network;
+  const a = document.createElement('a');
+  a.href = l.url;
+  a.textContent = l.url;
+  a.target = '_blank';
+  a.rel = 'noopener noreferrer';
+  li.append(net, a);
+  return li;
+}
+
+// A detached <ul class="links"> of the given links, or null if there are
+// none — for anywhere that shows someone's links inline.
+function linksList(links) {
+  if (!links || !links.length) return null;
+  const ul = document.createElement('ul');
+  ul.className = 'links';
+  for (const l of links) ul.appendChild(linkRow(l));
+  return ul;
+}
+
+// External-network links on the Identity page (your own profile).
+function renderLinks(links) {
+  const section = document.getElementById('links-section');
+  const list = document.getElementById('ext-links');
+  list.textContent = '';
+  section.hidden = !links || links.length === 0;
+  for (const l of links || []) list.appendChild(linkRow(l));
+}
+
 // --- profile editor ---------------------------------------------------
-// The published tags are just a list of strings the user assembles; the
-// taxonomy resolves anything typed (synonyms and all) inside profile_set,
-// so a bad entry comes back as an error naming it rather than being
-// dropped. Max five, matching the taxonomy's own rule.
+// The user assembles a list of `{tag, level}` and a list of
+// `{network, url}`. The taxonomy resolves anything typed (synonyms and
+// all) inside profile_set, so a bad entry comes back as an error naming
+// it rather than being dropped. Max five skills, matching the taxonomy's
+// own rule; `source` is left off — only commit-analysis sets it, and that
+// producer is not wired yet.
 const MAX_TAGS = 5;
-let profileTags = [];
+const LEVELS = ['beginner', 'intermediate', 'senior', 'expert'];
+let profileSkills = [];   // [{ tag, level: string|null }]
+let profileLinks = [];    // [{ network, url }]
 
 async function fillTaxonomy() {
   const leaves = await invoke('taxonomy_leaves');
@@ -615,35 +742,40 @@ async function fillTaxonomy() {
 async function showProfile() {
   const p = await invoke('profile_get');
   document.getElementById('profile-name').value = p.display_name || '';
-  profileTags = (p.tags || []).slice();
+  const levels = p.levels || {};
+  profileSkills = (p.tags || []).map((t) => ({ tag: t, level: levels[t] || null }));
+  profileLinks = (p.links || []).map((l) => ({ network: l.network, url: l.url }));
   renderChips();
+  renderLinkChips();
   // The score list is the earned side of the same picture — `identity`
   // folds it from countersigned contract history.
   const id = await invoke('identity');
   renderProfileScores(id.skills || []);
 }
 
-// One row per skill, its score up front. The score is the mean rating
-// counterparties gave the countersigned work carrying that tag (0–5) — the
-// only axis in QW that produces a number. Sorted proven-first: that is what
-// a reader is looking for.
+// One row per skill, grouped by field, its score up front. The score is
+// the mean rating counterparties gave the countersigned work carrying
+// that tag (0–5) — the only axis in QW that produces a number. Sorted
+// proven-first within each group: that is what a reader is looking for.
 function renderProfileScores(skills) {
   const list = document.getElementById('profile-scores');
-  const empty = document.getElementById('profile-scores-empty');
-  list.textContent = '';
-  empty.hidden = skills.length > 0;
+  document.getElementById('profile-scores-empty').hidden = skills.length > 0;
 
   const ordered = skills.slice().sort((a, b) =>
+    (a.group || '').localeCompare(b.group || '') ||
     (b.rating ?? -1) - (a.rating ?? -1) ||
     b.contracts - a.contracts ||
     a.tag.localeCompare(b.tag));
 
-  for (const s of ordered) {
+  renderGrouped(list, ordered, (s) => {
     const li = document.createElement('li');
     const tag = document.createElement('span');
     tag.className = 'skill-tag';
     tag.textContent = s.tag;
     li.appendChild(tag);
+
+    const lvl = levelBadge(s.level);
+    if (lvl) li.appendChild(lvl);
 
     const n = s.contracts === 1 ? '1 contract' : s.contracts + ' contracts';
     if (s.rating != null) {
@@ -652,32 +784,60 @@ function renderProfileScores(skills) {
     } else if (s.contracts > 0) {
       // Countersigned, but no counterparty recorded a rating — proven, unscored.
       li.appendChild(badge('unrated · ' + n, ''));
-    } else if (s.reviewed) {
-      li.appendChild(badge('reviewed · ' + s.reviewed, ''));
-    } else {
-      li.appendChild(badge('unproven', ''));
     }
+    if (s.reviewed) li.appendChild(badge('reviewed · ' + s.reviewed, ''));
+    li.appendChild(evidenceBadge(s.evidence));
     // Earned through contracts but never published, so a query for it cannot
     // route to you — worth adding below.
     if (!s.declared) li.appendChild(badge('not published', ''));
-
-    list.appendChild(li);
-  }
+    return li;
+  });
 }
 
 function renderChips() {
   const list = document.getElementById('profile-chips');
   list.textContent = '';
-  profileTags.forEach((tag, i) => {
+  profileSkills.forEach((sk, i) => {
     const li = document.createElement('li');
     li.className = 'chip';
     const label = document.createElement('span');
-    label.textContent = tag;
+    label.textContent = sk.tag;
+
+    const lvl = document.createElement('select');
+    lvl.setAttribute('aria-label', 'level for ' + sk.tag);
+    for (const opt of ['', ...LEVELS]) {
+      const o = document.createElement('option');
+      o.value = opt;
+      o.textContent = opt || 'level…';
+      lvl.appendChild(o);
+    }
+    lvl.value = sk.level || '';
+    lvl.onchange = () => { profileSkills[i].level = lvl.value || null; };
+
     const x = document.createElement('button');
     x.type = 'button';
     x.textContent = '×';
-    x.setAttribute('aria-label', 'remove ' + tag);
-    x.onclick = () => { profileTags.splice(i, 1); renderChips(); };
+    x.setAttribute('aria-label', 'remove ' + sk.tag);
+    x.onclick = () => { profileSkills.splice(i, 1); renderChips(); };
+
+    li.append(label, lvl, x);
+    list.appendChild(li);
+  });
+}
+
+function renderLinkChips() {
+  const list = document.getElementById('link-chips');
+  list.textContent = '';
+  profileLinks.forEach((l, i) => {
+    const li = document.createElement('li');
+    li.className = 'chip';
+    const label = document.createElement('span');
+    label.textContent = l.network + ' · ' + l.url;
+    const x = document.createElement('button');
+    x.type = 'button';
+    x.textContent = '×';
+    x.setAttribute('aria-label', 'remove ' + l.url);
+    x.onclick = () => { profileLinks.splice(i, 1); renderLinkChips(); };
     li.append(label, x);
     list.appendChild(li);
   });
@@ -688,14 +848,33 @@ document.getElementById('profile-add').onclick = () => {
   const v = input.value.trim();
   const status = document.getElementById('profile-status');
   if (!v) return;
-  if (profileTags.length >= MAX_TAGS) {
+  if (profileSkills.length >= MAX_TAGS) {
     status.textContent = `At most ${MAX_TAGS} tags — remove one first.`;
     return;
   }
-  if (!profileTags.includes(v)) profileTags.push(v);
+  if (!profileSkills.some((s) => s.tag === v)) profileSkills.push({ tag: v, level: null });
   input.value = '';
   status.textContent = '';
   renderChips();
+};
+
+document.getElementById('link-add').onclick = () => {
+  const net = document.getElementById('link-network');
+  const url = document.getElementById('link-url');
+  const status = document.getElementById('profile-status');
+  const u = url.value.trim();
+  if (!u) return;
+  if (!/^https?:\/\//i.test(u)) {
+    status.textContent = 'A link has to start with http:// or https://.';
+    return;
+  }
+  if (!profileLinks.some((l) => l.url === u)) {
+    profileLinks.push({ network: net.value.trim() || 'website', url: u });
+  }
+  net.value = '';
+  url.value = '';
+  status.textContent = '';
+  renderLinkChips();
 };
 
 document.getElementById('profile-save').onclick = async () => {
@@ -705,7 +884,8 @@ document.getElementById('profile-save').onclick = async () => {
     await invoke('profile_set', {
       edit: {
         display_name: document.getElementById('profile-name').value || null,
-        tags: profileTags,
+        skills: profileSkills.map((s) => ({ tag: s.tag, level: s.level || null })),
+        links: profileLinks.map((l) => ({ network: l.network, url: l.url })),
       },
     });
     status.textContent = 'Signed. Publishing…';
@@ -1289,16 +1469,26 @@ async function showContacts() {
 }
 
 // Per-contact controls appended by renderPeople. View pulls their held
-// profile (name + tags) if this client has one — the referral answer or a
-// sync could have carried it. Hide is the local-only filter.
+// profile if this client has one — the referral answer or a sync could
+// have carried it, links and levels included. Those links are the
+// "verify me elsewhere until a job vouches" surface, so a viewer needs to
+// see them. Hide is the local-only filter.
 function contactExtra(li, p) {
+  // Contacts carry `pubkey`/`npub`; a referral responder carries
+  // `responder_pubkey`/`responder_npub`. Same panel serves both.
+  const pubkey = p.pubkey || p.responder_pubkey;
+  const npub = p.npub || p.responder_npub || pubkey;
+  if (!pubkey) return;
+
   const bar = document.createElement('div');
   bar.className = 'neg-actions';
 
   const detail = document.createElement('div');
   detail.className = 'muted row-detail';
   detail.hidden = true;
-  detail.textContent = p.npub || p.pubkey;
+  const summary = document.createElement('div');
+  summary.textContent = npub;
+  detail.appendChild(summary);
 
   const view = document.createElement('button');
   view.type = 'button';
@@ -1309,27 +1499,35 @@ function contactExtra(li, p) {
     if (detail.hidden || detail.dataset.loaded) return;
     detail.dataset.loaded = '1';
     try {
-      const prof = await invoke('profile_of', { pubkey: p.pubkey });
+      const prof = await invoke('profile_of', { pubkey });
       if (prof) {
-        detail.textContent = (p.npub || p.pubkey) +
+        const levels = prof.levels || {};
+        const tags = (prof.tags || []).map((t) => levels[t] ? `${t} (${levels[t]})` : t);
+        summary.textContent = npub +
           (prof.display_name ? ' · ' + prof.display_name : '') +
-          (prof.tags && prof.tags.length ? ' · ' + prof.tags.join(', ') : '');
+          (tags.length ? ' · ' + tags.join(', ') : '');
+        const links = linksList(prof.links);
+        if (links) detail.appendChild(links);
       }
     } catch { /* leave the npub as-is */ }
   };
   bar.appendChild(view);
 
-  const hide = document.createElement('button');
-  hide.type = 'button';
-  hide.className = 'ghost';
-  hide.textContent = hiddenPeople.has(p.pubkey) ? 'Unhide' : 'Hide';
-  hide.onclick = () => {
-    if (hiddenPeople.has(p.pubkey)) hiddenPeople.delete(p.pubkey);
-    else hiddenPeople.add(p.pubkey);
-    saveHidden(HIDDEN_PEOPLE_KEY, hiddenPeople);
-    showContacts();
-  };
-  bar.appendChild(hide);
+  // Hide is a contact-list affordance; a search result has no local row
+  // to hide.
+  if (p.pubkey) {
+    const hide = document.createElement('button');
+    hide.type = 'button';
+    hide.className = 'ghost';
+    hide.textContent = hiddenPeople.has(p.pubkey) ? 'Unhide' : 'Hide';
+    hide.onclick = () => {
+      if (hiddenPeople.has(p.pubkey)) hiddenPeople.delete(p.pubkey);
+      else hiddenPeople.add(p.pubkey);
+      saveHidden(HIDDEN_PEOPLE_KEY, hiddenPeople);
+      showContacts();
+    };
+    bar.appendChild(hide);
+  }
 
   li.appendChild(bar);
   li.appendChild(detail);
@@ -1339,7 +1537,7 @@ async function refreshFindResults() {
   if (!lastQueryId) return;
   try {
     const rs = await invoke('referral_results', { qid: lastQueryId });
-    renderPeople(document.getElementById('find-results'), rs);
+    renderPeople(document.getElementById('find-results'), rs, contactExtra);
     const status = document.getElementById('find-status');
     if (rs.length) status.textContent = `${rs.length} responder${rs.length === 1 ? '' : 's'} so far.`;
   } catch (e) {

@@ -76,3 +76,13 @@ signature over `payload_hash`, and either publishing once both exist — is
 resulting event; how the two signatures actually reach each other (a
 direct message, a shared draft, etc.) is a transport concern, not fixed
 here.
+
+## No issuance: a side-settled contract
+
+A credit issuance is **not** mandatory. A contract paid by a side payment
+carries a NIP-QW01 kind 9006 (side settlement) instead of a 9010, and that
+is a valid terminal state: the countersigned completion still records the
+work and the rating, only the ledger entry is absent by design. A reader
+that sees a 9006 stops waiting for a 9010; NIP-QW13 §2 scores the contract
+as side-settled. A contract carrying **both** a 9006 and a 9010 is
+contradictory — the 9010 wins and the conflict is surfaced.

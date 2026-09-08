@@ -20,7 +20,9 @@ tags in..."). Do not put anything here that isn't meant to be public.
 ## Kind 10020 — Profile / skill tags
 
 Tags: `["revision", <n>]` (see below), then one `["t", <skill tag>]` per
-tag in `skill_tags`.
+tag in `skill_tags`, then one `["r", <url>]` per entry in `links` (the
+Nostr URL-reference convention, so a relay can index the profile by an
+external handle too).
 
 ```json
 {
@@ -28,6 +30,17 @@ tag in `skill_tags`.
   "skill_tags": [
     "it/backend/languages#rust",
     "it/backend/frameworks#axum"
+  ],
+  "skill_levels": {
+    "it/backend/languages#rust": "expert",
+    "it/backend/frameworks#axum": "senior"
+  },
+  "skill_sources": {
+    "it/backend/languages#rust": "commit-analysis"
+  },
+  "links": [
+    { "network": "github", "url": "https://github.com/vk" },
+    { "network": "linkedin", "url": "https://www.linkedin.com/in/vk" }
   ]
 }
 ```
@@ -38,6 +51,73 @@ taxonomy's own rule) — normalize free-text input through `/synonyms.yaml`
 **before** signing this event; tag fragmentation ("nodejs" vs "node.js")
 is unrecoverable once it's in a signed record; see the header comment in
 `/synonyms.yaml`.
+
+**Size limits.** Every entry in `skill_tags` — a taxonomy leaf or a
+custom label — MUST be **1 to 79 Unicode characters** (`<
+MAX_SKILL_TAG_LEN`), and a profile MUST carry **fewer than 80** of them
+(`< MAX_PROFILE_SKILLS`). A custom skill name is a label, not a sentence;
+a profile is a focused self-description, not a keyword dump — and both
+bounds keep the `["t"]` tags a relay indexes cheap. A conforming client
+MUST call `ProfileSkillTags::validate` before signing; a reader SHOULD
+reject an event whose content exceeds either bound rather than truncate
+it silently.
+
+`skill_levels`, `skill_sources` and `links` are all **optional and
+additive** — an event that omits them is valid, and an older client that
+does not know them parses the rest unchanged. Keys of `skill_levels` and
+`skill_sources` MUST be members of `skill_tags`; a reader drops any that
+are not.
+
+## Level, provenance and external links
+
+None of these three fields is evidence. They are self-asserted decoration
+on the claim, and a viewer weighs them against the countersigned contract
+history (§5) exactly as they weigh the bare tag.
+
+**`skill_levels`** — the holder's own estimate of their standing in that
+skill, one of `beginner` / `intermediate` / `senior` / `expert`. It does
+not affect referral routing or scoring; it is a hint for a human reading
+the profile. A tag absent from the map has no stated level.
+
+**`skill_sources`** — where the tag came from, one of:
+
+| value | meaning |
+|---|---|
+| `self` (default) | the holder typed it |
+| `commit-analysis` | a client suggested it from the holder's own commit history (`qw_node::bootstrap`) and the holder kept it |
+
+A tag absent from the map is `self`. `commit-analysis` is the
+"algorithmic" evidence class a UI shows before any job has approved the
+skill — strictly weaker than a countersigned contract, strictly stronger
+than nothing.
+
+**`links`** — a flat list of `{ network, url }` pointing at the holder's
+presence on other networks (GitHub, LinkedIn, a personal site). `url`
+MUST be `http(s)`. `network` is a free lowercase label. This is the
+"verify me elsewhere until a job does it for you" surface: a viewer with
+no countersigned contract to go on can still corroborate a claim by hand.
+Each link is also emitted as an `["r", url]` tag so a relay can route on
+it. Clients SHOULD bound the list (the reference client: 8) and de-dup by
+`url`.
+
+### Evidence class, as a client renders it
+
+A client showing a skill row picks the strongest of:
+
+1. **`approved by job`** — at least one countersigned contract in reach
+   carries the tag **and** settled through a credit issuance (NIP-QW02).
+   The strongest class, and the one whose score (§5) carries the
+   Quant-magnitude term.
+2. **`side-settled`** — a countersigned contract in reach carries the tag
+   but was settled off-system (NIP-QW01 kind 9006, no credit issuance).
+   Still scored (§5), but with no Quant-magnitude term and multiplied by
+   the viewer's `side_settled_factor` — below `approved by job`, above a
+   self-declared or commit-analysis tag.
+3. **`algorithmic`** — no such contract, but `skill_sources[tag]` is
+   `commit-analysis`.
+4. **`unproven`** — a bare self-declaration, nothing corroborating.
+
+The level pill (if any) is shown independently of the class.
 
 ## Replaceable, with a revision
 

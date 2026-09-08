@@ -1,7 +1,8 @@
 # NIP-QW01: Job lifecycle
 
 `draft` — kinds `9000` (offer), `9001` (accept), `9002` (milestone),
-`9003` (completion), `9004` (counteroffer), `9005` (review request)
+`9003` (completion), `9004` (counteroffer), `9005` (review request),
+`9006` (side settlement)
 
 ## Abstract
 
@@ -17,6 +18,7 @@ which is the mobile reality (`todo-impl.md` §4).
 | Accept | Worker | No |
 | Milestone (optional) | Either party | No |
 | Completion | Each separately | No |
+| Side settlement (optional) | Either party | No |
 
 ## Kind 9000 — Job offer
 
@@ -158,6 +160,36 @@ may request review of a delivered milestone or a completed job, with
 optional feedback, before posting their own kind 9003 completion. Closer
 in spirit to Counteroffer than to NIP-QW04's dispute annotations, which
 apply only to already-signed records — this applies before one.
+
+## Kind 9006 — Side settlement (optional)
+
+Tags: `["p", <counterparty pubkey>]`, `["e", <offer event id>]`, and the
+marker `["settlement", "side"]`.
+
+```json
+{ "note": "paid in cash on delivery" }
+```
+
+`note` is optional. Says the contract was **settled off-system** — paid by
+a side payment — so **no credit issuance (NIP-QW02, kind 9010) will
+follow**. It does not replace the kind 9003 completion: the countersigned
+completion still records that the work happened and was approved; this
+only tells a reader to stop waiting for a 9010 and to score the contract
+as side-settled rather than credit-backed.
+
+Either party may post it, anchored to the offer id like every other
+post-offer step. Both parties posting it is the mutually-attested case; a
+one-sided 9006 is a valid, detectable state exactly as a one-sided
+completion is. A contract that has **both** a 9006 and a matching 9010 is
+contradictory — a reader treats the credit issuance as authoritative and
+surfaces the conflict, the same way NIP-QW09 handles a signature under a
+revoked key.
+
+**Scoring.** NIP-QW13 §2: a side-settled contract keeps its `rating` and
+pass/fail signal, contributes no Quant-magnitude term (there is no
+amount), and its whole per-contract signal is multiplied by the viewer's
+`side_settled_factor`. It is the evidence class between a credit-backed
+contract and a self-declared / commit-analysis tag (NIP-QW03).
 
 ## State machine
 

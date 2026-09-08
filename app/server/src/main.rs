@@ -514,7 +514,7 @@ mod tests {
         let (st, _) = call(
             &app,
             "/api/profile_set",
-            json!({ "edit": { "display_name": "Vlad", "tags": ["Rust Lang"] } }),
+            json!({ "edit": { "display_name": "Vlad", "skills": [{ "tag": "Rust Lang" }] } }),
         )
         .await;
         assert_eq!(st, StatusCode::OK);
@@ -526,7 +526,7 @@ mod tests {
         let (st, err) = call(
             &app,
             "/api/profile_set",
-            json!({ "edit": { "display_name": null, "tags": ["underwater basket weaving"] } }),
+            json!({ "edit": { "display_name": null, "skills": [{ "tag": "underwater basket weaving" }] } }),
         )
         .await;
         assert_eq!(st, StatusCode::UNPROCESSABLE_ENTITY);
@@ -611,6 +611,7 @@ mod tests {
             &ProfileSkillTags {
                 display_name: None,
                 skill_tags: vec!["it/backend/languages#rust".into()],
+                ..Default::default()
             },
         )
         .sign(&author);
@@ -655,7 +656,7 @@ mod tests {
         call(
             &app,
             "/api/profile_set",
-            json!({ "edit": { "display_name": null, "tags": ["Rust Lang"] } }),
+            json!({ "edit": { "display_name": null, "skills": [{ "tag": "Rust Lang" }] } }),
         )
         .await;
         let (st, r) = call(&app, "/api/find_by_skill", json!({ "skill": "rust" })).await;

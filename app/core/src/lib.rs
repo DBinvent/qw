@@ -1007,6 +1007,7 @@ mod store_tests {
             &ProfileSkillTags {
                 display_name: None,
                 skill_tags: vec![tag.to_string()],
+                ..Default::default()
             },
         )
         .sign(identity)

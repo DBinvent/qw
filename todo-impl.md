@@ -163,6 +163,15 @@ This is the shared substrate everything else depends on.
       Y" — checkable, attributable, and discardable. The narrow version is
       safe where the general one is not.
 
+      **Groundwork landed 2026-09-08:** kind 10020 now carries a
+      self-assessed `skill_levels` map and a `skill_sources` map
+      (`self` / `commit-analysis`), and a client renders a three-state
+      `evidence` class per skill (`unproven` / `algorithmic` /
+      `approved_by_job`). That is the *self-signed* half — the `{skill_tag,
+      level, source}` vocabulary a broker-issued VC will reuse, with
+      `method` / `examined_at` and a real issuer still to add. Levels never
+      enter `score_trust_path`.
+
 - [ ] **External identity links in the profile** (added 2026-08-26, from
       conversation). Accept and expect a list of links to the places a
       person's work already lives — GitHub, LinkedIn, GitLab, a homepage —
@@ -171,6 +180,15 @@ This is the shared substrate everything else depends on.
       as a separate lookup. Today a QW identity is a bare key: correct, and
       unrecognisable
       to someone who knows the person by their GitHub handle.
+
+      **Partly landed 2026-09-08:** kind 10020 now carries a `links` list
+      (`{network, url}`, http(s) only, de-duped, also emitted as
+      `["r", url]` tags), surfaced in the profile editor and on the
+      Identity view, and it explicitly renders as *not evidence*. What is
+      still open is the **NIP-39 `["i", "github:handle", "<proof url>"]`
+      shape with a checkable back-link** — the current list is a bare
+      claim with no ownership proof and no `/gh/<handle>` short-link
+      resolver.
 
       **Use Nostr's NIP-39 shape, do not invent one.** `["i",
       "github:vkrinitsyn", "<proof url>"]` tags on the profile event. QW is
@@ -868,6 +886,24 @@ the standing client / protocol gaps, roughly in order.
   optional `ko` / `km` multipliers (`Quants = Hours × Rate × ko × km`) with
   a live total, and an **avg** button fills Rate from the mean of this
   identity's own settled contracts (skill-tag-matched when possible).
+- ***Profile: skill level, provenance, grouping, external links***
+  (2026-09-08) — kind 10020 (`ProfileSkillTags`) gained three optional,
+  additive fields: `skill_levels` (`beginner`/`intermediate`/`senior`/
+  `expert`, self-assessed, routing-neutral), `skill_sources`
+  (`self` default / `commit-analysis`), and `links` (`{network, url}`,
+  http(s), also emitted as `["r", url]` tags). `profile::build_signed` now
+  takes a richer `ProfileEdit { display_name, skills: [{tag, level,
+  source}], links }`; `SkillView` gained `group` (`sector/domain`, so the
+  UI groups without re-parsing), `level`, and a three-state `evidence`
+  class — `approved_by_job` (a countersigned contract carries the tag) >
+  `algorithmic` (kept from a `commit-analysis` suggestion) > `unproven`.
+  `IdentityView` gained `links`. UI: per-chip level dropdown, a links
+  editor, skills grouped by field on both Identity and Profile, the
+  evidence icon on every row. NIP-QW03 "Level, provenance and external
+  links". Still open below: the **NIP-39 `["i", …]` proof-link** shape
+  (this is the simpler flat list, no ownership proof) and **broker-signed
+  reviews** (the `source`/`level` vocabulary is deliberately the VC claim
+  shape those will reuse).
 
 **Standing client / protocol gaps — the protocol is well ahead of the client:**
 
