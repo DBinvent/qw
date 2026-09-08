@@ -196,6 +196,15 @@ pub trait AccountStore: Send + Sync {
     /// Replace the sealed blob (a ledger change re-seals under the same
     /// master).
     async fn set_blob(&self, id: Uuid, blob: &[u8]) -> Result<(), AccountError>;
+
+    /// This instance's default coordination-server list — the "public host
+    /// default list" served on `GET /servers` and pulled by fresh clients
+    /// and the mobile app. `None` before it is seeded on first boot.
+    async fn host_servers(&self) -> Result<Option<Vec<String>>, AccountError>;
+
+    /// Replace that list (first-boot seed from `QW_SERVERS`, or an operator
+    /// edit).
+    async fn set_host_servers(&self, servers: &[String]) -> Result<(), AccountError>;
 }
 
 /// Apply `accounts.schema.yaml` to `db_url`. Call once at the entrypoint,
@@ -324,6 +333,28 @@ impl AccountStore for PgAccountStore {
         }
         Ok(())
     }
+
+    async fn host_servers(&self) -> Result<Option<Vec<String>>, AccountError> {
+        let row: Option<(Json<Vec<String>>,)> =
+            sqlx::query_as("SELECT servers FROM host_config WHERE id = 1")
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(db)?;
+        Ok(row.map(|(Json(v),)| v))
+    }
+
+    async fn set_host_servers(&self, servers: &[String]) -> Result<(), AccountError> {
+        sqlx::query(
+            "INSERT INTO host_config (id, servers, updated_at) VALUES (1, $1, $2) \
+             ON CONFLICT (id) DO UPDATE SET servers = $1, updated_at = $2",
+        )
+        .bind(Json(servers))
+        .bind(unix_secs() as i64)
+        .execute(&self.pool)
+        .await
+        .map_err(db)?;
+        Ok(())
+    }
 }
 
 fn db(e: sqlx::Error) -> AccountError {
@@ -374,7 +405,10 @@ impl std::error::Error for AccountError {}
 /// is exercised.
 #[cfg(test)]
 #[derive(Default)]
-pub(crate) struct MemAccountStore(std::sync::Mutex<Vec<AccountRecord>>);
+pub(crate) struct MemAccountStore(
+    std::sync::Mutex<Vec<AccountRecord>>,
+    std::sync::Mutex<Option<Vec<String>>>,
+);
 
 #[cfg(test)]
 #[async_trait]
@@ -425,6 +459,13 @@ impl AccountStore for MemAccountStore {
             .ok_or(AccountError::NotFound)?;
         r.blob = blob.to_vec();
         r.updated_at = unix_secs();
+        Ok(())
+    }
+    async fn host_servers(&self) -> Result<Option<Vec<String>>, AccountError> {
+        Ok(self.1.lock().unwrap().clone())
+    }
+    async fn set_host_servers(&self, servers: &[String]) -> Result<(), AccountError> {
+        *self.1.lock().unwrap() = Some(servers.to_vec());
         Ok(())
     }
 }
@@ -538,6 +579,30 @@ mod tests {
             store.set_blob(Uuid::new_v4(), b"x").await,
             Err(AccountError::NotFound)
         ));
+    }
+
+    #[tokio::test]
+    async fn host_servers_round_trips() {
+        let store = MemAccountStore::default();
+        assert_eq!(store.host_servers().await.unwrap(), None);
+
+        store
+            .set_host_servers(&["https://a.example".into(), "https://b.example".into()])
+            .await
+            .unwrap();
+        assert_eq!(
+            store.host_servers().await.unwrap(),
+            Some(vec!["https://a.example".into(), "https://b.example".into()])
+        );
+
+        store
+            .set_host_servers(&["https://c.example".into()])
+            .await
+            .unwrap();
+        assert_eq!(
+            store.host_servers().await.unwrap(),
+            Some(vec!["https://c.example".into()])
+        );
     }
 
     // Both drivers (schema_guard_tokio's tokio-postgres and sqlx) accept

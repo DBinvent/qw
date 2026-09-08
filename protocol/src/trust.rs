@@ -12,6 +12,8 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
+use serde::{Deserialize, Serialize};
+
 use crate::contract::verify_credit_issuance;
 use crate::dual_index::{check_dual_index, DualIndexStatus};
 use crate::events::{
@@ -454,7 +456,8 @@ pub fn counterparty_recent_volume(events: &[Event], counterparty_pubkey: &str, s
 /// Per-participant configuration — never protocol-mandated (§0.8: no
 /// enforced default). `None` on either field means that filter isn't
 /// enforced at all.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct AdmissionPolicy {
     pub min_reputation: Option<f64>,
     /// Ceiling on the *magnitude* of bilateral net_position with the

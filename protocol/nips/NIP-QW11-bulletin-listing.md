@@ -56,6 +56,12 @@ a board needs to answer "show me what's currently posted matching X" —
 "backend" browse, not only an exact-tag match), and excludes anything
 past its `expires_at`.
 
+The board never gates on reputation — it returns matches, and the
+*browsing client* may hide a listing whose poster it scores below its
+own per-domain tolerance ([NIP-QW13](./NIP-QW13-reputation-scoring.md) §6).
+The "public gateway" discovery layer still filters per-viewer; it just
+does it at browse time rather than at routing time.
+
 ## What this NIP does not fix
 
 Per `todo-impl.md` §8's own note on this item: rate limits and

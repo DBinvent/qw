@@ -86,19 +86,20 @@ async fn main() {
     )
     .expect("open session");
     // §8: no server is hard-coded as authoritative — the list is ordered
-    // by this identity's own trust view. `pubkey` is blank until servers
-    // advertise one (unknown-risk → fee-order); the call is wired so real
-    // ranking arrives for free once they do.
-    session.rank_servers(
-        &servers
-            .iter()
-            .map(|url| ServerCandidate {
-                pubkey: String::new(),
-                base_url: url.clone(),
-                fee: 0.0,
-            })
-            .collect::<Vec<_>>(),
-    );
+    // by this identity's own trust view. Rank whatever the session now
+    // holds (a `sync-state.json` sidecar may have replaced the `QW_SERVERS`
+    // default with a saved list), not the env var. `pubkey` is blank until
+    // servers advertise one (unknown-risk → fee-order).
+    let candidates: Vec<ServerCandidate> = session
+        .servers()
+        .iter()
+        .map(|url| ServerCandidate {
+            pubkey: String::new(),
+            base_url: url.clone(),
+            fee: 0.0,
+        })
+        .collect();
+    session.rank_servers(&candidates);
     let web = Arc::new(Web {
         session: Mutex::new(session),
     });
@@ -132,9 +133,30 @@ fn router(web: Arc<Web>) -> Router {
         .route("/api/profile_of", post(profile_of))
         .route("/api/trust", post(trust))
         .route("/api/net_position", post(net_position))
+        .route("/api/servers", post(servers))
+        .route("/api/set_servers", post(set_servers))
+        .route("/api/admission", post(admission))
+        .route("/api/set_admission", post(set_admission))
+        .route("/servers", get(host_servers_get))
         .route("/ledger/pull", post(ledger_pull))
         .route("/ledger/push", post(ledger_push))
         .with_state(web)
+}
+
+/// The public bootstrap endpoint — a fresh client or the mobile app pulls
+/// this host's server list. On a single-user host that is just the one
+/// session's list. Unauthenticated, CORS-open, mirrors the multi-user
+/// host's `GET /servers`.
+async fn host_servers_get(State(web): State<Arc<Web>>) -> Response {
+    match on_session(web, |s| Ok::<_, String>(s.servers().to_vec())).await {
+        Ok(v) => (
+            StatusCode::OK,
+            [("access-control-allow-origin", "*")],
+            Json(v),
+        )
+            .into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+    }
 }
 
 // --- NIP-QW12 ledger replication (single-user host is one identity, so a
@@ -176,7 +198,11 @@ async fn index() -> Html<&'static str> {
 async fn session_info() -> Response {
     (
         StatusCode::OK,
-        Json(serde_json::json!({ "multi_user": false, "authenticated": true })),
+        Json(serde_json::json!({
+            "multi_user": false,
+            "authenticated": true,
+            "version": env!("CARGO_PKG_VERSION"),
+        })),
     )
         .into_response()
 }
@@ -298,6 +324,62 @@ async fn net_position(State(web): State<Arc<Web>>) -> Response {
     reply(on_session(web, |s| Ok::<_, String>(s.net_position())).await)
 }
 
+/// The coordination servers this identity syncs its mailbox against.
+async fn servers(State(web): State<Arc<Web>>) -> Response {
+    reply(on_session(web, |s| Ok::<_, String>(s.servers().to_vec())).await)
+}
+
+#[derive(Deserialize)]
+struct SetServersBody {
+    urls: Vec<String>,
+}
+/// Replace the coordination-server list; persists where the host keeps an
+/// account across restarts.
+async fn set_servers(State(web): State<Arc<Web>>, Json(b): Json<SetServersBody>) -> Response {
+    reply(
+        on_session(web, move |s| {
+            s.set_servers(b.urls).map_err(text)?;
+            Ok::<_, String>(s.servers().to_vec())
+        })
+        .await,
+    )
+}
+
+fn admission_json(min: Option<f64>, lim: Option<f64>) -> serde_json::Value {
+    serde_json::json!({ "min_reputation": min, "position_limit": lim })
+}
+
+/// The offer-time admission pre-filter (abstract.md §"Basic Use Cases").
+async fn admission(State(web): State<Arc<Web>>) -> Response {
+    reply(
+        on_session(web, |s| {
+            let (min, lim) = s.admission_policy();
+            Ok::<_, String>(admission_json(min, lim))
+        })
+        .await,
+    )
+}
+
+#[derive(Deserialize)]
+struct SetAdmissionBody {
+    #[serde(default)]
+    min_reputation: Option<f64>,
+    #[serde(default)]
+    position_limit: Option<f64>,
+}
+/// Configure that pre-filter; `null` on a field turns its check off.
+async fn set_admission(State(web): State<Arc<Web>>, Json(b): Json<SetAdmissionBody>) -> Response {
+    reply(
+        on_session(web, move |s| {
+            s.set_admission_policy(b.min_reputation, b.position_limit)
+                .map_err(text)?;
+            let (min, lim) = s.admission_policy();
+            Ok::<_, String>(admission_json(min, lim))
+        })
+        .await,
+    )
+}
+
 // --- plumbing ------------------------------------------------------
 
 fn text(e: impl std::fmt::Display) -> String {
@@ -377,6 +459,34 @@ mod tests {
             status,
             serde_json::from_slice(&bytes).unwrap_or(Value::Null),
         )
+    }
+
+    async fn get(app: &Router, path: &str) -> (StatusCode, Value) {
+        let res = app
+            .clone()
+            .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let status = res.status();
+        let bytes = to_bytes(res.into_body(), usize::MAX).await.unwrap();
+        (status, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+    }
+
+    #[tokio::test]
+    async fn public_servers_endpoint_returns_this_hosts_list() {
+        let dir = tempfile::tempdir().unwrap();
+        // `app()` starts with an empty list; set one, then read it back
+        // unauthenticated through GET /servers.
+        let app = app(dir.path());
+        call(
+            &app,
+            "/api/set_servers",
+            json!({ "urls": ["https://relay.example"] }),
+        )
+        .await;
+        let (st, body) = get(&app, "/servers").await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(body, json!(["https://relay.example"]));
     }
 
     #[tokio::test]
@@ -594,5 +704,74 @@ mod tests {
         let (st, np) = call(&app, "/api/net_position", json!({})).await;
         assert_eq!(st, StatusCode::OK);
         assert_eq!(np, json!(0.0));
+    }
+
+    #[tokio::test]
+    async fn server_list_is_readable_and_settable() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(dir.path());
+
+        // the test host is started with an empty server list
+        let (st, before) = call(&app, "/api/servers", json!({})).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(before, json!([]));
+
+        // replace it; the handler echoes the cleaned list back
+        let (st, after) = call(
+            &app,
+            "/api/set_servers",
+            json!({ "urls": ["https://one.example", " https://two.example ", "https://one.example"] }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(after, json!(["https://one.example", "https://two.example"]));
+        let (_, now) = call(&app, "/api/servers", json!({})).await;
+        assert_eq!(now, json!(["https://one.example", "https://two.example"]));
+
+        // a bad URL is a 422 naming it; the list is untouched
+        let (st, err) = call(&app, "/api/set_servers", json!({ "urls": ["mailto:x"] })).await;
+        assert_eq!(st, StatusCode::UNPROCESSABLE_ENTITY);
+        assert!(err["error"].as_str().unwrap().contains("mailto:x"));
+        let (_, still) = call(&app, "/api/servers", json!({})).await;
+        assert_eq!(still, json!(["https://one.example", "https://two.example"]));
+    }
+
+    #[tokio::test]
+    async fn admission_filter_is_readable_and_settable() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(dir.path());
+
+        // nothing configured on a fresh host
+        let (st, before) = call(&app, "/api/admission", json!({})).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(before, json!({ "min_reputation": null, "position_limit": null }));
+
+        // set both thresholds; the handler echoes the stored policy
+        let (st, after) = call(
+            &app,
+            "/api/set_admission",
+            json!({ "min_reputation": 2.5, "position_limit": 500.0 }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(after, json!({ "min_reputation": 2.5, "position_limit": 500.0 }));
+        let (_, now) = call(&app, "/api/admission", json!({})).await;
+        assert_eq!(now["min_reputation"], json!(2.5));
+
+        // null turns a check off
+        let (_, cleared) = call(
+            &app,
+            "/api/set_admission",
+            json!({ "min_reputation": null, "position_limit": 500.0 }),
+        )
+        .await;
+        assert_eq!(cleared, json!({ "min_reputation": null, "position_limit": 500.0 }));
+
+        // a negative threshold is a 422; the policy is untouched
+        let (st, err) = call(&app, "/api/set_admission", json!({ "min_reputation": -1.0 })).await;
+        assert_eq!(st, StatusCode::UNPROCESSABLE_ENTITY);
+        assert!(err["error"].as_str().unwrap().contains("zero or more"));
+        let (_, unchanged) = call(&app, "/api/admission", json!({})).await;
+        assert_eq!(unchanged["position_limit"], json!(500.0));
     }
 }

@@ -37,6 +37,7 @@ evidence, so it moved to the **replaceable** band at `10020` (mirroring
 | 9090 | Chain-calculation result | [NIP-QW10](./NIP-QW10-chain-calculation-result.md) | `qw_protocol::events::kinds`, `qw_server` |
 | 9091 | Bulletin listing | [NIP-QW11](./NIP-QW11-bulletin-listing.md) | `qw_protocol::events::kinds`, `qw_server` |
 | — | Personal ledger replication (no new kind) | [NIP-QW12](./NIP-QW12-ledger-sync.md) | `qw_node::ledger` (core built; HTTP transport open) |
+| — | Reputation scoring & propagation (no new kind) | [NIP-QW13](./NIP-QW13-reputation-scoring.md) | `qw_protocol::trust` (single-path magnitude score today; the configurable model in the spec is staged) |
 
 ## Conventions shared across all QW kinds
 

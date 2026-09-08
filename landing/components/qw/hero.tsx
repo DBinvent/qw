@@ -14,7 +14,7 @@ export function Hero() {
           Early prototype · open source
         </div>
         <h1 className="mt-6 text-balance text-4xl font-semibold tracking-tight text-foreground sm:text-5xl">
-          Skills confirmed by the people you worked with
+          Skills confirmed by the people you worked with and for
         </h1>
         <p className="mx-auto mt-5 max-w-xl text-pretty leading-relaxed text-muted-foreground">
           Found through friends of friends. A peer-verified contribution network: time

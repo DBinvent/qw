@@ -91,14 +91,49 @@ passphrase, (re)generate a recovery code, reveal the identity key. A live
 curl smoke of `register (recovery code in body) → /session →
 kek_list/add/recovery/rotate/drop → seed_export → login-with-each` was run
 against a throwaway PG on 2026-09-05.
-`raw/scripts/deploy-qw-web.sh` installs it (default mode);
+`../../../qw-bo/qw.sh web` installs it (default mode);
 `qw.knownby.work` (public, no Access) tunnels to `:8112`.
 
 Remaining, roughly in priority for a public host: email-verify (parked
-low-priority — see `todo-impl.md`), the delta blob format, and the
-multi-user `/ledger/*` routes (NIP-QW12; need a per-account auth channel —
-a device subkey — before a many-identity box serves one identity's ledger
-to its replicas; the single-user host already serves them).
+low-priority — see `todo-impl.md`; **when it lands the address is stored
+encrypted at rest, the same as the nickname — a keyed-BLAKE2b blind index
+for lookup plus an XChaCha20 cipher column, never plaintext — and it is a
+verify / notify channel only, never a passphrase reset**), the delta blob
+format, and the multi-user `/ledger/*` routes (NIP-QW12; need a per-account
+auth channel — a device subkey — before a many-identity box serves one
+identity's ledger to its replicas; the single-user host already serves them).
+
+- **Coordination-server list — per account + a public host default,
+  built 2026-09-07 / -09-08.**
+  - *Per account:* `SyncState.servers`; `Session::set_servers` validates
+    (http(s), non-empty, de-duped via `qw_client_core::clean_server_list`)
+    and folds the list into the sealed blob, so an account's chosen relays
+    survive sign-out and a host restart. `POST /api/{servers,set_servers}`.
+    The single-user host and the Tauri app now persist it too — `EventStore`
+    grew a `sync-state.json` sidecar (`HistoryStore::loaded_sync_state`,
+    replayed by `Session::with_identity`), so the outbox, cursors, server
+    list and admission policy survive a restart everywhere, not only in the
+    multi-user blob.
+  - *Public host default:* a `host_config` singleton row in Postgres,
+    seeded from `QW_SERVERS` on first boot and authoritative thereafter,
+    served unauthenticated (CORS-open) on `GET /servers` — the "bootstrap"
+    list a fresh web client or the mobile app pulls. `Session::bootstrap_
+    servers(url)` + a Tauri `bootstrap_servers` command + a "Fetch" control
+    on the Mail page do the pull. `POST /servers` edits the row, gated by a
+    `Bearer` token matching `QW_ADMIN_TOKEN` (unset ⇒ 403, the seed stands).
+  The Mail page carries both the per-account editor and the bootstrap
+  field.
+- **Admission pre-filter per account — built 2026-09-07.** `SyncState`
+  gained `admission` (`trust::AdmissionPolicy` — min-reputation +
+  position-limit, both optional); `Session::set_admission_policy` folds it
+  into the sealed blob. `POST /api/{admission,set_admission}`; a **Filter**
+  tab. `Session::negotiations` marks a failing inbound proposal
+  `passes_filter: false` (flagged, not hidden — abstract.md "Basic Use
+  Cases": the human may always admit it). The two checks use the
+  abstract.md score calc: min-reputation is `assess_reputation`
+  (verified-credit path score, unknown-risk when none); the position limit
+  is a multiplier on the requester's `counterparty_recent_volume` over 90
+  days, so the ceiling scales with their recent completed work.
 
 - **Outbox persistence — built 2026-09-05.** `qw_client_core` gained
   `SyncState` (outbox event ids + per-server poll cursors),
@@ -303,10 +338,10 @@ session dies with it.
   (re)generate a recovery code, and (behind a disclosure) reveal the
   identity key. `doAuth` surfaces the registration recovery code once, in
   the same accent box.
-- **[done]** deploy — `../../../raw/scripts/deploy-qw-web.sh` (default mode)
-  + `deploy/qw-web-mu.service`. One script, two modes (`--single` is the
-  key-on-disk client). Opens a sudo session up front (`sudo su - -c whoami`,
-  like `br.sh`), builds as the invoking user, provisions the `qwweb` system
+- **[done]** deploy — `../../../qw-bo/qw.sh web` (default mode)
+  + `deploy/qw-web-mu.service`. Two modes (`--single` is the key-on-disk
+  client). Opens a sudo session up front (`sudo -v`), builds as the
+  invoking user, provisions the `qwweb` system
   user + Postgres role/db (peer auth), generates `/etc/qw-web-mu/server-key.hex`
   once, writes `/etc/qw-web-mu/env`, installs the unit, health-checks
   (`GET /` 200, unauth `/api/*` 401, `accounts` table present). Written,

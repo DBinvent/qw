@@ -441,6 +441,12 @@ pub struct NegotiationView {
     /// An audit request is attached with no audit opinion answering it
     /// yet — the "under review, undecided" state the FAQ describes.
     pub under_review: bool,
+    /// `false` only for an inbound proposal still open that fails this
+    /// viewer's admission pre-filter (abstract.md §"Basic Use Cases").
+    /// `list` always sets `true`; [`crate::session::Session::negotiations`]
+    /// is where the filter is actually applied, because it needs the
+    /// viewer's configured thresholds.
+    pub passes_filter: bool,
     /// Newest relevant signature timestamp — what the list sorts on.
     pub last_update: u64,
 }
@@ -489,6 +495,7 @@ pub fn list(events: &[Event], me_pubkey_hex: &str) -> Vec<NegotiationView> {
                 can_accept: !am_client && negotiating,
                 disputes,
                 under_review,
+                passes_filter: true,
                 last_update,
             })
         })

@@ -146,10 +146,10 @@
   <main>
   <h1>QW</h1>
 
-  <!-- Unhidden by boot() on any web build (isWeb). The hosted version
-       generates and holds your key in server memory for the length of a
-       session; the app never does. Kept visible after sign-in too, not
-       just on the auth screen — the risk does not go away once you are in. -->
+  <!-- Shown by boot() on a web build only while the sign-in / register form
+       is up: the hosted version generates and holds your key in server
+       memory for the session, and that is a call to make before you
+       register. Hidden once you are signed in. -->
   <div id="web-disclaimer" hidden>
     <strong>Hosted preview.</strong> This browser build keeps your signing
     key in the server's memory while you are signed in — it is not on your
@@ -172,11 +172,12 @@
         and decrypts your account on this server. It is sent once over TLS
         to unlock the session and is never stored — pick something long,
         and reuse it nowhere.</p>
-      <p><strong>No email, so no email recovery.</strong> Registering takes a
-        nickname and a passphrase, nothing else. There is no confirmation
-        link and no "reset password": this host cannot email you. Forget the
+      <p><strong>Email is not a way back in.</strong> Registering takes a
+        nickname and a passphrase. If an address is added it is stored
+        encrypted at rest, the same as the nickname, and is only ever a
+        verify / notify channel — never a passphrase reset. Forget the
         passphrase and the one-time <em>recovery code</em> shown right after
-        you register is the only way back — without it the account is gone.</p>
+        you register is the only way back; without it the account is gone.</p>
     </div>
     <p><input id="auth-nick" placeholder="Nickname — at least 8 characters"
        autocomplete="username" autocapitalize="none" spellcheck="false"></p>
@@ -197,6 +198,7 @@
     <button type="button" data-page="profile">Profile</button>
     <button type="button" data-page="contracts">Contracts</button>
     <button type="button" data-page="contacts">Contacts</button>
+    <button type="button" data-page="filter">Filter</button>
     <button type="button" data-page="mail">Mail</button>
     <button type="button" data-page="security" id="nav-security" hidden>Security</button>
   </nav>
@@ -236,11 +238,22 @@
   <!-- ===================== PROFILE ===================== -->
   <div class="page" data-page="profile" hidden>
   <section>
-    <div class="muted">Your profile — the skills a referral query matches
-      you on. Published tags are <strong>public</strong>: that is how relays
-      route a question to you. There is no half-public tag; one you do not
-      publish is simply unreachable.</div>
-    <p class="muted" id="profile-current"></p>
+    <div class="muted">Your skills and the <strong>score</strong> each has
+      earned — the mean rating counterparties gave the countersigned work
+      behind that tag (0–5), over how many contracts. Countersigned work is
+      the only axis that carries a number (NIP-QW03 §5): a bare claim or a
+      review adds reach, not a score. A tag with no countersigned contract
+      shows <span class="badge">unproven</span> — published and findable, but
+      nothing has scored it yet.</div>
+    <ul class="skills" id="profile-scores"></ul>
+    <p class="muted" id="profile-scores-empty">No skills yet — add one below,
+      publish it, then complete a contract to put a score on it.</p>
+  </section>
+
+  <section>
+    <div class="muted">Publish the tags a referral query should match you on.
+      They are <strong>public</strong> — that is how relays route a question
+      to you, and one you do not publish is simply unreachable.</div>
     <p><input id="profile-name" placeholder="Display name (optional)"
               autocapitalize="words" spellcheck="false" maxlength="80"></p>
     <div class="row">
@@ -287,7 +300,15 @@
       <div class="row">
         <input id="neg-hours" inputmode="decimal" placeholder="Hours">
         <input id="neg-rate" inputmode="decimal" placeholder="Rate">
+        <button id="neg-rate-avg" type="button" class="ghost">avg</button>
       </div>
+      <!-- abstract.md: Quants = Hours × Rate × ko × km. ko/km are optional
+           subjective multipliers — leave blank to keep the price simple. -->
+      <div class="row">
+        <input id="neg-ko" inputmode="decimal" placeholder="ko × (optional)">
+        <input id="neg-km" inputmode="decimal" placeholder="km × (optional)">
+      </div>
+      <p class="muted" id="neg-price">= 0 Quants</p>
       <p><textarea id="neg-terms" placeholder="What the work is"></textarea></p>
       <button id="neg-send">Sign proposal</button>
       <button id="neg-cancel" class="ghost" type="button" hidden>Cancel</button>
@@ -341,6 +362,42 @@
   </section>
   </div>
 
+  <!-- ===================== FILTER ===================== -->
+  <div class="page" data-page="filter" hidden>
+  <section>
+    <div class="muted">Two local pre-filters run on every inbound proposal
+      before you look at it (abstract.md, "Basic Use Cases"). A proposal
+      that fails one is <strong>flagged</strong> on the Contracts list — not
+      hidden, and you can always admit it anyway. Both thresholds are
+      private: a declined party is never told which one it failed, or that
+      either is set. Leave a field blank to turn that check off.</div>
+
+    <p class="muted"><strong>Minimum reputation</strong> — your trust-path
+      score for the requester in this skill area (abstract.md, "Web of
+      Trust"): the Quant value on the closing edge of the shortest verified
+      credit-issuance path from you to them, halved for each hop of
+      distance. No such path is <em>unknown-risk</em>, which is below any
+      threshold — a fresh key is unknown-risk, not neutral. Each Contracts
+      row shows this number for its counterparty, to calibrate against.</p>
+    <p><input id="filter-minrep" inputmode="decimal"
+              placeholder="e.g. 5 — blank = off"></p>
+
+    <p class="muted"><strong>Position limit</strong> — a
+      <strong>multiplier</strong> of how much verified work the requester
+      has completed in the last 90 days (abstract.md: the ceiling "scales
+      with how much work that counterparty has recently completed").
+      <code>1.0</code> lets a proposal push your running balance with them
+      up to one times their recent output; <code>0</code> allows none, and
+      someone with no recent completed work has an effective ceiling of
+      zero.</p>
+    <p><input id="filter-poslimit" inputmode="decimal"
+              placeholder="e.g. 1.5 — blank = off"></p>
+
+    <button id="filter-save">Save filter</button>
+    <p class="muted" id="filter-status"></p>
+  </section>
+  </div>
+
   <!-- ===================== MAIL ===================== -->
   <div class="page" data-page="mail" hidden>
   <section>
@@ -352,6 +409,28 @@
     <p class="muted" id="sync-status">Not synced yet.</p>
     <p class="muted" id="mail-tallies"></p>
   </section>
+
+  <section>
+    <div class="muted">Relay / coordination servers — the mailboxes a Sync
+      flushes to and polls from, tried top to bottom. They are untrusted
+      infrastructure: one can withhold or delay your mail, but nothing it
+      serves is taken without a signature check on this device. Add your own
+      if you run one. One URL per line.</div>
+    <p><textarea id="servers-box" spellcheck="false" autocapitalize="none"
+                 autocorrect="off" placeholder="https://qw-dash-api.knownby.work"></textarea></p>
+    <button id="servers-save">Save server list</button>
+    <p class="muted" id="servers-status"></p>
+
+    <div class="muted">Or pull a web host's published default list and adopt
+      it — point at a <code>qw-web</code> you trust and take its
+      <code>GET /servers</code> as your own.</div>
+    <div class="row">
+      <input id="servers-bootstrap-url" spellcheck="false" autocapitalize="none"
+             autocorrect="off" inputmode="url" placeholder="https://qw.knownby.work">
+      <button id="servers-bootstrap" type="button">Fetch</button>
+    </div>
+  </section>
+
   <section id="signout-section" hidden>
     <div class="muted">Signed in to this host. Signing out clears the session
       key from server memory; your records stay.</div>
@@ -492,13 +571,13 @@ function renderSkills(skills) {
       row.appendChild(badge('reviewed · ' + s.reviewed, ''));
     }
     if (s.contracts > 0) {
-      // Rating only when a counterparty actually gave one. Printing 0.0 for
+      // Score only when a counterparty actually rated it. Printing 0.0 for
       // "nobody said" would read as "they said it was terrible".
-      const stars = s.rating === null || s.rating === undefined
+      const score = s.rating === null || s.rating === undefined
         ? ''
-        : ' · ' + s.rating.toFixed(1) + '★';
+        : ' · score ' + s.rating.toFixed(1);
       const n = s.contracts === 1 ? '1 contract' : s.contracts + ' contracts';
-      row.appendChild(badge(n + stars, 'contract'));
+      row.appendChild(badge(n + score, 'contract'));
     }
     if (!s.reviewed && !s.contracts && s.declared) {
       row.appendChild(badge('mentioned', ''));
@@ -538,9 +617,52 @@ async function showProfile() {
   document.getElementById('profile-name').value = p.display_name || '';
   profileTags = (p.tags || []).slice();
   renderChips();
-  document.getElementById('profile-current').textContent = (p.tags && p.tags.length)
-    ? 'Published: ' + (p.display_name ? p.display_name + ' — ' : '') + p.tags.join(', ')
-    : 'Nothing published yet.';
+  // The score list is the earned side of the same picture — `identity`
+  // folds it from countersigned contract history.
+  const id = await invoke('identity');
+  renderProfileScores(id.skills || []);
+}
+
+// One row per skill, its score up front. The score is the mean rating
+// counterparties gave the countersigned work carrying that tag (0–5) — the
+// only axis in QW that produces a number. Sorted proven-first: that is what
+// a reader is looking for.
+function renderProfileScores(skills) {
+  const list = document.getElementById('profile-scores');
+  const empty = document.getElementById('profile-scores-empty');
+  list.textContent = '';
+  empty.hidden = skills.length > 0;
+
+  const ordered = skills.slice().sort((a, b) =>
+    (b.rating ?? -1) - (a.rating ?? -1) ||
+    b.contracts - a.contracts ||
+    a.tag.localeCompare(b.tag));
+
+  for (const s of ordered) {
+    const li = document.createElement('li');
+    const tag = document.createElement('span');
+    tag.className = 'skill-tag';
+    tag.textContent = s.tag;
+    li.appendChild(tag);
+
+    const n = s.contracts === 1 ? '1 contract' : s.contracts + ' contracts';
+    if (s.rating != null) {
+      li.appendChild(badge('score ' + s.rating.toFixed(1) + ' / 5', 'contract'));
+      li.appendChild(badge(n, ''));
+    } else if (s.contracts > 0) {
+      // Countersigned, but no counterparty recorded a rating — proven, unscored.
+      li.appendChild(badge('unrated · ' + n, ''));
+    } else if (s.reviewed) {
+      li.appendChild(badge('reviewed · ' + s.reviewed, ''));
+    } else {
+      li.appendChild(badge('unproven', ''));
+    }
+    // Earned through contracts but never published, so a query for it cannot
+    // route to you — worth adding below.
+    if (!s.declared) li.appendChild(badge('not published', ''));
+
+    list.appendChild(li);
+  }
 }
 
 function renderChips() {
@@ -639,6 +761,9 @@ async function showNegotiations() {
     st.className = 'badge' + (n.state === 'accepted' ? ' contract' : '');
     st.textContent = n.your_move ? 'your move' : n.state;
     line.append(party, role, st);
+    // Fails this viewer's admission pre-filter (Filter tab). Shown, never
+    // hidden — the human may always admit it (abstract.md).
+    if (n.passes_filter === false) line.appendChild(badge('below your filter', ''));
     // Your own trust read on the counterparty — pub_window liveness plus
     // §5 credit-path standing, so a proposal is not judged on terms alone.
     try {
@@ -651,7 +776,8 @@ async function showNegotiations() {
     const terms = document.createElement('p');
     terms.className = 'neg-terms muted';
     const money = `${t.hours}h × ${t.rate}` + (t.ko ? ` × ko ${t.ko}` : '') + (t.km ? ` × km ${t.km}` : '');
-    terms.textContent = `${t.skill_tags.join(', ')} · ${money}` +
+    const quants = (t.hours * t.rate * (t.ko || 1) * (t.km || 1)).toFixed(2);
+    terms.textContent = `${t.skill_tags.join(', ')} · ${money} = ${quants} Quants` +
       (n.rounds ? ` · round ${n.rounds}` : '') + ` — ${t.terms}`;
     li.appendChild(terms);
 
@@ -779,13 +905,55 @@ function renderNegChips() {
   });
 }
 
+// abstract.md: Quants = Hours × Rate × ko × km. ko/km omitted read as 1.
+function updateNegPrice() {
+  const h = parseFloat(document.getElementById('neg-hours').value);
+  const r = parseFloat(document.getElementById('neg-rate').value);
+  const ko = parseFloat(document.getElementById('neg-ko').value);
+  const km = parseFloat(document.getElementById('neg-km').value);
+  const el = document.getElementById('neg-price');
+  if (!Number.isFinite(h) || !Number.isFinite(r)) { el.textContent = '= 0 Quants'; return; }
+  const koF = Number.isFinite(ko) ? ko : 1;
+  const kmF = Number.isFinite(km) ? km : 1;
+  const q = h * r * koF * kmF;
+  const parts = [h, r];
+  if (Number.isFinite(ko)) parts.push('ko ' + ko);
+  if (Number.isFinite(km)) parts.push('km ' + km);
+  el.textContent = `${parts.join(' × ')} = ${q.toFixed(2)} Quants`;
+}
+for (const id of ['neg-hours', 'neg-rate', 'neg-ko', 'neg-km']) {
+  document.getElementById(id).addEventListener('input', updateNegPrice);
+}
+
+// "avg": fill Rate with the mean of this identity's own accepted /
+// completed contracts, preferring ones that share a skill tag with the
+// draft — a market average from the record you already hold.
+document.getElementById('neg-rate-avg').onclick = async () => {
+  const status = document.getElementById('neg-status');
+  try {
+    const rows = await invoke('negotiations');
+    const done = rows.filter((n) => ['accepted', 'completed', 'credit_issued'].includes(n.state));
+    const overlap = done.filter((n) =>
+      (n.head_terms.skill_tags || []).some((t) => negSkills.includes(t)));
+    const pick = overlap.length ? overlap : done;
+    if (!pick.length) { status.textContent = 'No settled contracts yet to average.'; return; }
+    const avg = pick.reduce((a, n) => a + n.head_terms.rate, 0) / pick.length;
+    document.getElementById('neg-rate').value = avg.toFixed(2);
+    updateNegPrice();
+    status.textContent = `Rate set to your ${overlap.length ? 'skill' : 'overall'} average over ${pick.length} contract${pick.length === 1 ? '' : 's'}.`;
+  } catch (e) {
+    status.textContent = String(e);
+  }
+};
+
 function resetProposeBox() {
   counterTarget = null;
   negSkills = [];
   renderNegChips();
-  for (const id of ['neg-party', 'neg-skill', 'neg-hours', 'neg-rate', 'neg-terms']) {
+  for (const id of ['neg-party', 'neg-skill', 'neg-hours', 'neg-rate', 'neg-ko', 'neg-km', 'neg-terms']) {
     document.getElementById(id).value = '';
   }
+  updateNegPrice();
   const party = document.getElementById('neg-party');
   party.disabled = false;
   document.getElementById('neg-intro-hint').hidden = true;
@@ -817,7 +985,10 @@ function openCounter(n) {
   party.disabled = true;
   document.getElementById('neg-hours').value = n.head_terms.hours;
   document.getElementById('neg-rate').value = n.head_terms.rate;
+  document.getElementById('neg-ko').value = n.head_terms.ko ?? '';
+  document.getElementById('neg-km').value = n.head_terms.km ?? '';
   document.getElementById('neg-terms').value = n.head_terms.terms;
+  updateNegPrice();
   document.getElementById('propose-summary').textContent = 'Counter — replaces the current terms';
   document.getElementById('neg-send').textContent = 'Sign counter';
   document.getElementById('neg-cancel').hidden = false;
@@ -843,17 +1014,27 @@ document.getElementById('neg-cancel').onclick = () => resetProposeBox();
 
 document.getElementById('neg-send').onclick = async () => {
   const status = document.getElementById('neg-status');
+  const num = (id) => {
+    const v = parseFloat(document.getElementById(id).value);
+    return Number.isFinite(v) ? v : null;
+  };
   const terms = {
     skill_tags: negSkills,
     hours: parseFloat(document.getElementById('neg-hours').value),
     rate: parseFloat(document.getElementById('neg-rate').value),
-    ko: null,
-    km: null,
+    ko: num('neg-ko'),
+    km: num('neg-km'),
     terms: document.getElementById('neg-terms').value,
   };
   if (!Number.isFinite(terms.hours) || !Number.isFinite(terms.rate)) {
     status.textContent = 'Hours and rate must be numbers.';
     return;
+  }
+  for (const [k, v] of [['ko', terms.ko], ['km', terms.km]]) {
+    if (v !== null && !(v > 0)) {
+      status.textContent = `${k}, if set, must be a positive number.`;
+      return;
+    }
   }
   status.textContent = 'Signing…';
   try {
@@ -951,13 +1132,100 @@ document.getElementById('sync').onclick = async () => {
     document.getElementById('mail-tallies').textContent =
       `Outbox: ${r.still_queued} waiting to send. Ledger: ${r.held} record${r.held === 1 ? '' : 's'} held.`;
     // A sync can deliver a countersigned completion, which changes what is
-    // earned — so re-read it rather than leaving a stale list on screen.
+    // earned — so re-read it (Identity's skill list and Profile's scores)
+    // rather than leaving a stale list on screen.
     await showIdentity();
+    await showProfile();
     // It can also deliver a counteroffer or an Accept — the same reason.
     await showNegotiations();
     // …and referral traffic: a new contact, or an answer to an open query.
     await showContacts();
     await refreshFindResults();
+  } catch (e) {
+    status.textContent = String(e);
+  }
+};
+
+// --- relay / coordination servers --------------------------------
+async function showServers() {
+  try {
+    const list = await invoke('servers');
+    document.getElementById('servers-box').value = (list || []).join('\n');
+  } catch { /* not signed in yet */ }
+}
+
+document.getElementById('servers-save').onclick = async () => {
+  const status = document.getElementById('servers-status');
+  const urls = document.getElementById('servers-box').value
+    .split('\n').map((l) => l.trim()).filter(Boolean);
+  status.textContent = 'Saving…';
+  try {
+    const saved = await invoke('set_servers', { urls });
+    document.getElementById('servers-box').value = (saved || []).join('\n');
+    status.textContent = 'Saved. The next Sync uses this list.';
+  } catch (e) {
+    status.textContent = String(e);
+  }
+};
+
+document.getElementById('servers-bootstrap').onclick = async () => {
+  const status = document.getElementById('servers-status');
+  const url = document.getElementById('servers-bootstrap-url').value.trim();
+  if (!url) return;
+  status.textContent = 'Fetching…';
+  try {
+    let saved;
+    if (isWeb) {
+      // The host serves /servers with Access-Control-Allow-Origin: *, so a
+      // cross-origin browser fetch is fine.
+      const r = await fetch(url.replace(/\/+$/, '') + '/servers');
+      if (!r.ok) throw `${url}: ${r.status}`;
+      saved = await invoke('set_servers', { urls: await r.json() });
+    } else {
+      saved = await invoke('bootstrap_servers', { url });
+    }
+    document.getElementById('servers-box').value = (saved || []).join('\n');
+    status.textContent = `Adopted ${saved.length} server${saved.length === 1 ? '' : 's'} from ${url}.`;
+  } catch (e) {
+    status.textContent = String(e);
+  }
+};
+
+// --- admission pre-filter (abstract.md "Basic Use Cases") --------
+async function showFilter() {
+  try {
+    const p = await invoke('admission');
+    document.getElementById('filter-minrep').value =
+      p.min_reputation == null ? '' : p.min_reputation;
+    document.getElementById('filter-poslimit').value =
+      p.position_limit == null ? '' : p.position_limit;
+  } catch { /* not signed in yet */ }
+}
+
+document.getElementById('filter-save').onclick = async () => {
+  const status = document.getElementById('filter-status');
+  const parse = (id) => {
+    const raw = document.getElementById(id).value.trim();
+    if (!raw) return { ok: true, value: null };
+    const v = parseFloat(raw);
+    return Number.isFinite(v) && v >= 0 ? { ok: true, value: v } : { ok: false };
+  };
+  const min = parse('filter-minrep');
+  const lim = parse('filter-poslimit');
+  if (!min.ok || !lim.ok) {
+    status.textContent = 'Each threshold must be a number ≥ 0, or blank.';
+    return;
+  }
+  status.textContent = 'Saving…';
+  try {
+    const p = await invoke('set_admission', {
+      min_reputation: min.value, position_limit: lim.value,
+    });
+    status.textContent =
+      (p.min_reputation == null && p.position_limit == null)
+        ? 'Saved — filter off, every proposal reaches you.'
+        : 'Saved. Failing proposals are flagged on Contracts, not hidden.';
+    await showNegotiations();
   } catch (e) {
     status.textContent = String(e);
   }
@@ -1216,7 +1484,7 @@ document.getElementById('seed-reveal').onclick = async () => {
 // data-page="…"> shown alone. The last one visited is remembered so a
 // reload lands where you were.
 
-const PAGES = ['identity', 'profile', 'contracts', 'contacts', 'mail', 'security'];
+const PAGES = ['identity', 'profile', 'contracts', 'contacts', 'filter', 'mail', 'security'];
 
 function showPage(name) {
   if (!PAGES.includes(name)) name = 'identity';
@@ -1283,10 +1551,6 @@ async function authFetch(path, body) {
 }
 
 async function boot() {
-  // The hosted build holds the key server-side; say so, and keep saying so
-  // after sign-in. Irrelevant in the Tauri shell, where the key is local.
-  if (isWeb) document.getElementById('web-disclaimer').hidden = false;
-
   // One probe up front: is this a login host, and are we already on a
   // valid cookie? It makes `multiUser` reliable even on a plain reload,
   // where nothing 401s. A host too old to answer leaves it to the 401
@@ -1303,9 +1567,14 @@ async function boot() {
     await showProfile();
     await showNegotiations();
     await showContacts();
+    await showServers();
+    await showFilter();
     if (multiUser) await showKeys();
     document.getElementById('auth').hidden = true;
     document.getElementById('app').hidden = false;
+    // The hosted-key warning is a sign-in-time decision aid; once you are
+    // in it is just noise. (A re-run of boot() after login lands here.)
+    document.getElementById('web-disclaimer').hidden = true;
     document.getElementById('signout-section').hidden = !multiUser;
     document.getElementById('security-na').hidden = multiUser;
     // Land on the last page visited; fall back to Identity, and never open
@@ -1319,6 +1588,8 @@ async function boot() {
       multiUser = true;
       document.getElementById('app').hidden = true;
       document.getElementById('auth').hidden = false;
+      // Shown only alongside the sign-in / register form.
+      document.getElementById('web-disclaimer').hidden = false;
     } else {
       const b = document.getElementById('boot-error');
       b.textContent = 'Could not load: ' + String(e);

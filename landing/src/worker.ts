@@ -294,7 +294,7 @@ export default {
 
       const short = `${invite.slice(0, 12)}…${invite.slice(-6)}`;
       const title = "You've been invited to connect on QW";
-      const description = `${short} shared a QW invite link. Following it makes you a direct contact — skills confirmed by the people you worked with.`;
+      const description = `${short} shared a QW invite link. Following it makes you a direct contact — skills confirmed by the people you worked with and for.`;
 
       return new HTMLRewriter()
         .on("title", new TitleRewriter(title))

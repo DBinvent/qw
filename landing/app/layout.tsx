@@ -17,11 +17,11 @@ const jetbrainsMono = JetBrains_Mono({
 export const metadata: Metadata = {
   title: 'QW — knownby.work',
   description:
-    'Skills confirmed by the people you worked with. Found through friends of friends. A peer-verified contribution network — no blockchain, no tokens, no central authority.',
+    'Skills confirmed by the people you worked with and for. Found through friends of friends. A peer-verified contribution network — no blockchain, no tokens, no central authority.',
   metadataBase: new URL('https://knownby.work'),
   openGraph: {
     title: 'QW — knownby.work',
-    description: 'Skills confirmed by the people you worked with. Found through friends of friends.',
+    description: 'Skills confirmed by the people you worked with and for. Found through friends of friends.',
     url: 'https://knownby.work',
     siteName: 'QW',
     type: 'website',

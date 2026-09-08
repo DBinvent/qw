@@ -54,7 +54,7 @@ implementation; revisit before any real-money-adjacent or multi-org rollout.
 | 5 | Cascade block threshold / initiator | Default: any WoT member can *flag*; a block **auto-cascades** to accounts within relay-graph distance 1 of a flagged signer once ≥2 independent flaggers (distance-bounded, non-overlapping paths) confirm; beyond that, manual per-participant review | Before opening flagging to the public internet (spam-flag risk) |
 | 6 | Cold start / network density | Launch wedge = **one existing open-source ecosystem** with contribution history already in commit logs (see §7) | After first cohort proves the referral loop |
 | 7 | Dispute timeout default | **30 days** from counterparty signature timestamp before a contract flips to `unsigned/expired` (raised from the doc's 14-day suggestion for more offline/mobile tolerance) | Adjust from field data once contracts are flowing |
-| 8 | Admission-filter defaults — min-reputation threshold and position-limit scaling (added 2026-08-07, see §5) | **No enforced default at launch.** Filters exist in the client but start unset (everything passes) until a participant configures them; the position limit's scaling formula against "counterparty's recent completed work" is left as a client-side implementation detail, not a protocol default | Once §5 produces a real per-viewer trust score to threshold against |
+| 8 | Admission-filter defaults — min-reputation threshold and position-limit scaling (added 2026-08-07, see §5) | **No enforced default at launch.** Filters exist in the client and start unset (everything passes) until a participant configures them. **Wired into the client 2026-09-07**: `Session::{admission_policy, set_admission_policy}` persisted in `SyncState`, a *Filter* tab, and `NegotiationView.passes_filter` flagging (not hiding) a failing inbound proposal. The two checks are the abstract.md §"Basic Use Cases" computations: min-reputation is `trust::assess_reputation` (shortest verified `CreditIssuance` path, `score_trust_path` = closing-edge value × `hop_decay^(hops-1)`, unknown-risk when no path); the position limit is a **multiplier** the client applies to `trust::counterparty_recent_volume` over a 90-day window (`Session::RECENT_VOLUME_WINDOW_SECS`), so the effective ceiling "scales with how much work that counterparty has recently completed". | Multi-path aggregation ("several independent paths ... a stronger signal") is still single-shortest-path only |
 
 Also locked in from the FAQ (not open questions, just flagging as constraints
 the implementation must respect):
@@ -315,6 +315,22 @@ since it's demoable standalone and is the differentiator.
 
 ## 5. Trust graph & net_position
 
+- [ ] **Configurable reputation model — spec'd 2026-09-07 as
+      [NIP-QW13](protocol/nips/NIP-QW13-reputation-scoring.md).** From
+      conversation: the score should be a per-viewer, per-domain,
+      fully-configurable computation over held records — a `1.0`-centred
+      multiplier folding in the counterparty *rating* and pass/fail (not
+      just the credit magnitude `score_trust_path` uses today), a
+      taxonomy scope-inheritance matrix (`java` counting toward `backend`
+      at a configured fraction) in place of the binary `same_domain`,
+      per-domain `tolerance` thresholds, multi-path aggregation, an
+      optional "contrarian" transitive transform, and a `net_position`
+      balance term in the overall figure. NIP-QW13 §7 is the current-vs-
+      spec gap table; §8 stages it (re-base the score + add rating first).
+      Visibility/broadcasting score-gating (referral forward, answer rank,
+      bulletin browse) is §6 of that NIP — none of it gates on score
+      today.
+
 - [ ] **Calculator profile** (added 2026-08-10, from conversation): attach
       an explicit, referenceable "who computed this and under what
       parameters" profile to a computed score, not just the raw number
@@ -422,8 +438,8 @@ Priority` list.
       (`MuWeb`: `/auth/register|login|logout` + the `/api/<cmd>`
       routes behind `with_session`, token session table, sweeper).
       `app/ui/index.html` shows a sign-in panel on the first 401. Deploy:
-      `raw/scripts/deploy-qw-web.sh` (default mode; `--single` for the
-      key-on-disk client) + `deploy/qw-web-mu.service`. Rate-limiting on
+      `../qw-bo/qw.sh web` (default mode; `--single` for the key-on-disk
+      client) + `deploy/qw-web-mu.service`. Rate-limiting on
       `/auth/register` + `/auth/login` is built (`src/ratelimit.rs`: 5/hour
       per IP on register, 20/5min per IP + 10/5min per account on login).
       Workspace 274 green + 2 Postgres round-trips. Full record:
@@ -824,6 +840,34 @@ the standing client / protocol gaps, roughly in order.
   shows the thread and an "annotate" control on each negotiation. Still
   to come: indexing `audit_opinion` by its author (the auditor's own
   staked record), and threading a reply onto another annotation.
+- ***Coordination-server list — per-account + public host default***
+  (2026-09-07 / -09-08) — `SyncState.servers`; `Session::set_servers`
+  validates (`qw_client_core::clean_server_list`) and persists it. **Now
+  persisted everywhere**: `EventStore` grew a `sync-state.json` sidecar
+  (`HistoryStore::loaded_sync_state`, replayed in `Session::with_identity`),
+  so single-user web + the phone keep the server list, outbox, cursors and
+  admission policy across a restart — not only the multi-user blob. A
+  **`host_config` Postgres row** (seeded from `QW_SERVERS`) is served on an
+  unauthenticated, CORS-open `GET /servers`; `Session::bootstrap_servers`
+  + a Tauri command + a Mail-page "Fetch" control pull it. `POST /servers`
+  edits the row, gated by `QW_ADMIN_TOKEN`. `POST /api/{servers,set_servers}`
+  stay the per-account path.
+- ***Admission pre-filter + coefficient pricing*** (2026-09-07) —
+  `SyncState.admission` (`trust::AdmissionPolicy`, now `Serialize`);
+  `Session::{admission_policy, set_admission_policy}` + an `admits()` helper.
+  Both checks are the abstract.md §"Basic Use Cases" score calculations:
+  **min-reputation** is `trust::assess_reputation` (shortest verified
+  `CreditIssuance` path, closing-edge value × hop-decay, unknown-risk when
+  no path); **position limit** is a multiplier `admits()` applies to
+  `trust::counterparty_recent_volume` (90-day window), so the ceiling
+  scales with the requester's recent completed work. `NegotiationView.
+  passes_filter` is `false` only for an inbound proposal still open that
+  fails the policy (flagged on the Contracts list, never hidden). A new
+  **Filter** tab; `POST /api/{admission,set_admission}` on both hosts + a
+  Tauri command. Separately, the propose / counter box now exposes the
+  optional `ko` / `km` multipliers (`Quants = Hours × Rate × ko × km`) with
+  a live total, and an **avg** button fills Rate from the mean of this
+  identity's own settled contracts (skill-tag-matched when possible).
 
 **Standing client / protocol gaps — the protocol is well ahead of the client:**
 

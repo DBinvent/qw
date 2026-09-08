@@ -163,6 +163,12 @@ reading, documented there:
   simply never gets a cache entry, so it can never be a routing target
   for queries needing tag similarity to *me*).
 
+A **per-domain reputation floor** on forwarding and on answer-ranking is a
+planned addition on top of this table — see
+[NIP-QW13](./NIP-QW13-reputation-scoring.md) §6 ("Visibility & broadcasting").
+Today routing gates only on `accept_depth` / `categories` / `rate_limit`;
+the score does not enter it.
+
 ## Carriage (client note, not wire format)
 
 `qw_client_core` runs a `Node` per identity (2026-09-05). Two pragmatic

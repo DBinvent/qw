@@ -463,6 +463,8 @@ mod tests {
         let st = SyncState {
             outbox: vec![e.id.clone()],
             cursors: [("http://s".to_string(), 100u64)].into_iter().collect(),
+            servers: vec!["https://relay.example".to_string()],
+            admission: Default::default(),
         };
         o.history.persist_sync_state(&st).unwrap();
         assert!(o.history.dirty(), "a changed snapshot re-seals");

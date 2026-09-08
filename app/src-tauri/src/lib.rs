@@ -142,6 +142,55 @@ fn net_position(state: State<'_, AppState>) -> Result<f64, String> {
     Ok(session(&state)?.net_position())
 }
 
+/// The coordination servers the mailbox syncs against, in try order.
+#[tauri::command]
+fn servers(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    Ok(session(&state)?.servers().to_vec())
+}
+
+/// Replace that list; persisted to `sync-state.json` in the app data dir,
+/// so it survives a relaunch.
+#[tauri::command]
+fn set_servers(urls: Vec<String>, state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    let mut s = session(&state)?;
+    s.set_servers(urls).map_err(|e| e.to_string())?;
+    Ok(s.servers().to_vec())
+}
+
+/// Pull a web host's advertised default list from `GET {url}/servers` and
+/// adopt it — the "bootstrap from a host you trust" flow.
+#[tauri::command]
+fn bootstrap_servers(url: String, state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    session(&state)?
+        .bootstrap_servers(&url)
+        .map_err(|e| e.to_string())
+}
+
+fn admission_value(min: Option<f64>, lim: Option<f64>) -> serde_json::Value {
+    serde_json::json!({ "min_reputation": min, "position_limit": lim })
+}
+
+/// The offer-time admission pre-filter (abstract.md §"Basic Use Cases").
+#[tauri::command]
+fn admission(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let (min, lim) = session(&state)?.admission_policy();
+    Ok(admission_value(min, lim))
+}
+
+/// Configure that pre-filter; `null` on a field turns its check off.
+#[tauri::command]
+fn set_admission(
+    min_reputation: Option<f64>,
+    position_limit: Option<f64>,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut s = session(&state)?;
+    s.set_admission_policy(min_reputation, position_limit)
+        .map_err(|e| e.to_string())?;
+    let (min, lim) = s.admission_policy();
+    Ok(admission_value(min, lim))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -158,21 +207,21 @@ pub fn run() {
                 servers.clone(),
             )?;
             // §8 forbids hard-coding one server as authoritative — the list
-            // is ordered by this identity's own trust view of each. The
-            // `pubkey` is blank until servers advertise one (unknown-risk
-            // → fee-order); wiring the call now means real ranking lands
-            // for free when they do, and a `QW_SERVERS`-style multi-entry
-            // list is trust-ordered from day one.
-            session.rank_servers(
-                &servers
-                    .iter()
-                    .map(|url| ServerCandidate {
-                        pubkey: String::new(),
-                        base_url: url.clone(),
-                        fee: 0.0,
-                    })
-                    .collect::<Vec<_>>(),
-            );
+            // is ordered by this identity's own trust view of each. Rank
+            // whatever the session now holds: `sync-state.json` in the app
+            // data dir may have replaced the built-in default with a saved
+            // or bootstrapped list. `pubkey` is blank until servers
+            // advertise one (unknown-risk → fee-order).
+            let candidates: Vec<ServerCandidate> = session
+                .servers()
+                .iter()
+                .map(|url| ServerCandidate {
+                    pubkey: String::new(),
+                    base_url: url.clone(),
+                    fee: 0.0,
+                })
+                .collect();
+            session.rank_servers(&candidates);
             app.manage(AppState {
                 session: Mutex::new(session),
             });
@@ -195,7 +244,12 @@ pub fn run() {
             referral_results,
             profile_of,
             trust,
-            net_position
+            net_position,
+            servers,
+            set_servers,
+            bootstrap_servers,
+            admission,
+            set_admission
         ])
         .run(tauri::generate_context!())
         .expect("error while running QW");

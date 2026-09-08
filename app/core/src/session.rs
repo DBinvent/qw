@@ -54,6 +54,11 @@ const INVITE_BASE: &str = "https://knownby.work";
 /// coordination server — the same default the referral query uses.
 const SERVER_RANK_MAX_HOPS: u8 = 3;
 
+/// "Recently completed work" for the admission position limit (abstract.md
+/// §"Basic Use Cases" — the exposure ceiling "scales with how much work
+/// that counterparty has recently completed"). 90 days, a quarter.
+const RECENT_VOLUME_WINDOW_SECS: u64 = 90 * 24 * 60 * 60;
+
 /// Load and persist the identity key. The only file a user must actually
 /// back up (§2: there is no account to recover it from).
 pub trait KeyStore {
@@ -101,13 +106,21 @@ pub trait HistoryStore: Send {
     /// mailbox on a cold start (`todo-impl.md` §7 "Outbox persistence").
     ///
     /// It is on this trait, rather than a store of its own, because the
-    /// one implementation that has somewhere to put it — the encrypted
-    /// multi-user blob — is also the only thing holding that account's
-    /// master key. The append-only `events.jsonl` store has no natural
-    /// home for mutable state and keeps the default no-op; its outbox
-    /// stays RAM-only, the same as the phone's.
+    /// two implementations that have somewhere to put it — the encrypted
+    /// multi-user blob, and the `events.jsonl` store's `sync-state.json`
+    /// sidecar — differ in *where*, not *whether*.
     fn persist_sync_state(&mut self, _state: &SyncState) -> Result<(), ClientError> {
         Ok(())
+    }
+
+    /// The [`SyncState`] this store loaded from its backing on open — a
+    /// sidecar file, or (for the multi-user blob) `SyncState::default()`
+    /// because the host restores that one explicitly from the sealed
+    /// payload. [`Session::with_identity`] applies it at construction so a
+    /// configured server list, the outbox and warm cursors survive a
+    /// restart without every shell wiring `restore_sync_state` by hand.
+    fn loaded_sync_state(&self) -> SyncState {
+        SyncState::default()
     }
 }
 
@@ -120,7 +133,7 @@ pub trait HistoryStore: Send {
 /// The outbox is stored as **event ids**, not events: every queued event
 /// is already in the [`HistoryStore`] (authoring appends there first), so
 /// keeping the bytes twice would only let the two copies drift.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct SyncState {
     /// Ids of ledger events not yet accepted by any server, oldest first.
     #[serde(default)]
@@ -128,6 +141,18 @@ pub struct SyncState {
     /// `base_url` -> newest `created_at` already collected from it.
     #[serde(default)]
     pub cursors: BTreeMap<String, u64>,
+    /// The coordination servers this identity syncs its mailbox against,
+    /// in try order. Empty means "not configured here" — a restore leaves
+    /// whatever the host handed the constructor (`QW_SERVERS`, or the
+    /// app's built-in) in place. Set through [`Session::set_servers`].
+    #[serde(default)]
+    pub servers: Vec<String>,
+    /// The offer-time admission pre-filter (abstract.md "Basic Use Cases",
+    /// §5): minimum requester reputation and a bilateral position ceiling.
+    /// Both `None` by default — nothing is filtered until configured. Set
+    /// through [`Session::set_admission_policy`].
+    #[serde(default)]
+    pub admission: trust::AdmissionPolicy,
 }
 
 /// One client's live state. `Send` (so a shell can put it behind a
@@ -151,6 +176,10 @@ pub struct Session {
     /// `query_id`, deduped by responder (lowest hop count wins).
     referral_results: BTreeMap<String, Vec<FinalAnswerView>>,
     servers: Vec<String>,
+    /// The offer-time admission pre-filter (abstract.md §"Basic Use
+    /// Cases"). Default-empty: nothing is filtered until the user sets a
+    /// threshold. Persisted with the rest of [`SyncState`].
+    admission: trust::AdmissionPolicy,
 }
 
 impl Session {
@@ -186,7 +215,14 @@ impl Session {
             query_seq: 0,
             referral_results: BTreeMap::new(),
             servers,
+            admission: trust::AdmissionPolicy::default(),
         };
+        // Adopt whatever the store persisted last run (a sidecar file; the
+        // multi-user host restores its sealed copy on top of this and they
+        // agree). A store with nothing persisted hands back a default,
+        // which leaves the constructor `servers` alone.
+        let loaded = session.history.loaded_sync_state();
+        session.restore_sync_state(&loaded);
         session.refresh_node();
         session
     }
@@ -198,6 +234,118 @@ impl Session {
     /// The coordination servers, in the order a sync will try them.
     pub fn servers(&self) -> &[String] {
         &self.servers
+    }
+
+    /// Replace the coordination-server list — the mailbox relays a sync
+    /// flushes to and polls from. Each entry is trimmed; blank lines are
+    /// dropped; every survivor must be an `http://` or `https://` URL; the
+    /// list is de-duplicated in first-seen order and must end non-empty (a
+    /// client with no server cannot send or collect mail). The new list is
+    /// folded into the [`SyncState`] the host persists, so it survives a
+    /// restart wherever that host keeps one. It is *not* re-ranked — order
+    /// as given is order tried; run [`Session::rank_servers`] after if you
+    /// want the trust ordering.
+    pub fn set_servers(&mut self, urls: Vec<String>) -> Result<(), ClientError> {
+        self.servers = crate::clean_server_list(urls)?;
+        let snapshot = self.sync_state();
+        self.history.persist_sync_state(&snapshot)?;
+        Ok(())
+    }
+
+    /// Fetch a web host's advertised coordination-server list from
+    /// `GET {host_url}/servers` and adopt it (validated exactly as
+    /// [`Session::set_servers`] would). This is the "public host default
+    /// list" bootstrap — the phone or a fresh client points at a `qw-web`
+    /// it trusts and takes that operator's list as its own. Returns the
+    /// adopted list.
+    pub fn bootstrap_servers(&mut self, host_url: &str) -> Result<Vec<String>, ClientError> {
+        let url = format!("{}/servers", host_url.trim_end_matches('/'));
+        let resp = reqwest::blocking::Client::new()
+            .get(&url)
+            .send()
+            .map_err(|e| ClientError::Http(e.to_string()))?;
+        if !resp.status().is_success() {
+            return Err(ClientError::UnexpectedStatus(resp.status().as_u16()));
+        }
+        let list: Vec<String> = resp
+            .json()
+            .map_err(|e| ClientError::Http(format!("{url}: {e}")))?;
+        self.set_servers(list)?;
+        Ok(self.servers.clone())
+    }
+
+    /// The offer-time admission pre-filter as configured —
+    /// `(min_reputation, position_limit)`, each `None` when that check is
+    /// off (abstract.md §"Basic Use Cases"). Private thresholds: a client
+    /// never tells a declined requester which one it failed, or that one
+    /// is set at all.
+    pub fn admission_policy(&self) -> (Option<f64>, Option<f64>) {
+        (self.admission.min_reputation, self.admission.position_limit)
+    }
+
+    /// Set that pre-filter. `None` on a field turns its check off; a
+    /// negative or non-finite value is rejected. Folded into the persisted
+    /// [`SyncState`]. It is never protocol-mandated (§0.8: no enforced
+    /// default) and never auto-rejects silently here — `negotiations()`
+    /// flags a failing inbound proposal so the human can still admit it.
+    pub fn set_admission_policy(
+        &mut self,
+        min_reputation: Option<f64>,
+        position_limit: Option<f64>,
+    ) -> Result<(), ClientError> {
+        for (name, v) in [
+            ("minimum reputation", min_reputation),
+            ("position limit", position_limit),
+        ] {
+            if let Some(v) = v {
+                if !v.is_finite() || v < 0.0 {
+                    return Err(ClientError::Config(format!("{name} must be zero or more")));
+                }
+            }
+        }
+        self.admission = trust::AdmissionPolicy {
+            min_reputation,
+            position_limit,
+        };
+        let snapshot = self.sync_state();
+        self.history.persist_sync_state(&snapshot)?;
+        Ok(())
+    }
+
+    /// Does an inbound request from `requester` pass this identity's
+    /// admission pre-filter? `true` when no filter is set.
+    ///
+    /// Both checks are the abstract.md §"Basic Use Cases" computations:
+    ///
+    /// - **Minimum reputation** — `trust::assess_reputation`, i.e. the
+    ///   score of the shortest verified `CreditIssuance` path from us to
+    ///   `requester` in `skill_domain` (closing-edge value × hop decay),
+    ///   or unknown-risk when no path reaches them. A fresh key is
+    ///   unknown-risk, not neutral, so it falls below any threshold.
+    /// - **Position limit** — the configured number is a *multiplier* of
+    ///   `requester`'s verified completed volume in the recent window
+    ///   ([`RECENT_VOLUME_WINDOW_SECS`]); the effective ceiling is that
+    ///   product, so it "scales with how much work that counterparty has
+    ///   recently completed". Someone with none has an effective ceiling
+    ///   of zero.
+    fn admits(&self, requester: &str, skill_domain: Option<&str>) -> bool {
+        let events = self.history.events();
+        let scaled = trust::AdmissionPolicy {
+            min_reputation: self.admission.min_reputation,
+            position_limit: self.admission.position_limit.map(|mult| {
+                let since = unix_now().saturating_sub(RECENT_VOLUME_WINDOW_SECS);
+                mult * trust::counterparty_recent_volume(events, requester, since)
+            }),
+        };
+        trust::evaluate_admission(
+            events,
+            &self.pubkey_hex(),
+            requester,
+            &scaled,
+            TRUST_MAX_HOPS,
+            skill_domain,
+            &trust::ScoringWeights::default(),
+        ) == trust::AdmissionDecision::Admit
     }
 
     /// Everything this identity holds — the input to a NIP-QW12 ledger
@@ -384,20 +532,23 @@ impl Session {
         }
     }
 
-    /// The outbox ids and poll cursors as a [`SyncState`] — what a host
-    /// that persists an account writes beside the ledger.
+    /// The outbox ids, poll cursors and configured server list as a
+    /// [`SyncState`] — what a host that persists an account writes beside
+    /// the ledger.
     pub fn sync_state(&self) -> SyncState {
         SyncState {
             outbox: self.sync.pending().iter().map(|e| e.id.clone()).collect(),
             cursors: self.sync.cursor_snapshot().into_iter().collect(),
+            servers: self.servers.clone(),
+            admission: self.admission,
         }
     }
 
     /// Rehydrate a [`SyncState`] saved by an earlier process: re-queue
     /// each outbox event still held in the ledger (an id no longer there
-    /// was pruned or the blob was edited — drop it) and restore every
-    /// cursor. Call once, right after opening the session and before the
-    /// first `sync_now`.
+    /// was pruned or the blob was edited — drop it), restore every cursor,
+    /// and adopt a saved server list. Call once, right after opening the
+    /// session and before the first `sync_now`.
     pub fn restore_sync_state(&mut self, state: &SyncState) {
         for id in &state.outbox {
             if let Some(event) = self.history.events().iter().find(|e| &e.id == id) {
@@ -407,6 +558,12 @@ impl Session {
         for (base_url, created_at) in &state.cursors {
             self.sync.restore_cursor(base_url.clone(), *created_at);
         }
+        // A saved list overrides the constructor default; an empty one
+        // leaves that default (`QW_SERVERS` / the app's built-in) alone.
+        if !state.servers.is_empty() {
+            self.servers = state.servers.clone();
+        }
+        self.admission = state.admission;
     }
 
     /// Identity, invite link + QR, and one row per skill — declared
@@ -706,7 +863,19 @@ impl Session {
     /// Every negotiation this identity is a party to, newest activity
     /// first.
     pub fn negotiations(&self) -> Vec<NegotiationView> {
-        negotiation::list(self.history.events(), &self.pubkey_hex())
+        let mut rows = negotiation::list(self.history.events(), &self.pubkey_hex());
+        // The admission pre-filter is an *inbound* gate: apply it only to a
+        // proposal still open that the counterparty sent us. A failing row
+        // is flagged, not dropped — the human may always admit it.
+        if self.admission != trust::AdmissionPolicy::default() {
+            for n in &mut rows {
+                if !n.am_client && n.state == "negotiating" {
+                    let domain = n.head_terms.skill_tags.first().map(String::as_str);
+                    n.passes_filter = self.admits(&n.counterparty_pubkey, domain);
+                }
+            }
+        }
+        rows
     }
 
     /// Sign and queue a fresh proposal (kind 9000). Returns the offer id.
@@ -1222,14 +1391,15 @@ mod tests {
         assert_eq!(snap.outbox, vec![a.outbox()[0].id.clone()]);
         snap.cursors.insert("http://srv".into(), 4242);
 
-        // A fresh Session over the same on-disk ledger starts empty — the
-        // queued offer is `p`-tagged to the counterparty, so no sync would
-        // ever bring it back; only a restored snapshot does.
+        // A fresh Session over the same dir now auto-restores from the
+        // `sync-state.json` sidecar `author()` wrote — the queued offer
+        // (`p`-tagged to the counterparty, so no sync would bring it back)
+        // is there without an explicit restore.
         let mut b = session_at(dir.path());
-        assert!(b.outbox().is_empty());
-        b.restore_sync_state(&snap);
         assert_eq!(b.outbox().len(), 1);
         assert_eq!(b.outbox()[0].id, a.outbox()[0].id);
+        // a cursor set only in the in-memory snapshot still needs one
+        b.restore_sync_state(&snap);
         assert_eq!(b.sync_state().cursors.get("http://srv"), Some(&4242));
     }
 
@@ -1240,8 +1410,181 @@ mod tests {
         s.restore_sync_state(&SyncState {
             outbox: vec!["deadbeef".repeat(8)],
             cursors: Default::default(),
+            servers: Vec::new(),
+            admission: Default::default(),
         });
         assert!(s.outbox().is_empty(), "an id with no matching event is skipped");
+    }
+
+    #[test]
+    fn the_event_store_sidecar_carries_servers_and_the_outbox_across_a_reopen() {
+        let dir = tempfile::tempdir().unwrap();
+        {
+            let mut s = session_at(dir.path());
+            s.set_servers(vec!["https://relay.one".into(), "https://relay.two".into()])
+                .unwrap();
+            s.set_admission_policy(Some(2.0), None).unwrap();
+            s.propose(ProposeArgs {
+                counterparty: "b".repeat(64),
+                from_introduction: None,
+                terms: terms("rust", 1.0, 10.0, "x"),
+            })
+            .unwrap();
+            assert!(dir.path().join("sync-state.json").exists());
+        } // session dropped — nothing in memory survives
+
+        let s2 = session_at(dir.path());
+        assert_eq!(s2.servers(), ["https://relay.one", "https://relay.two"]);
+        assert_eq!(s2.admission_policy(), (Some(2.0), None));
+        assert_eq!(s2.outbox().len(), 1, "the queued offer came back from the sidecar");
+    }
+
+    #[test]
+    fn set_servers_validates_dedups_and_rides_the_sync_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = session_at(dir.path());
+
+        // non-http entries are refused, naming the offender
+        assert!(matches!(
+            s.set_servers(vec!["ftp://nope".into()]),
+            Err(ClientError::Config(_))
+        ));
+        // an all-empty list is refused — a client with no server is mute
+        assert!(matches!(
+            s.set_servers(vec!["   ".into()]),
+            Err(ClientError::Config(_))
+        ));
+
+        s.set_servers(vec![
+            "  https://a.example  ".into(),
+            "http://b.example".into(),
+            "https://a.example".into(), // dup of the first, trimmed
+            String::new(),              // dropped
+        ])
+        .unwrap();
+        assert_eq!(s.servers(), ["https://a.example", "http://b.example"]);
+        // it is in the snapshot a persisting host writes
+        assert_eq!(
+            s.sync_state().servers,
+            vec!["https://a.example".to_string(), "http://b.example".to_string()]
+        );
+
+        // a fresh session over the SAME dir now auto-adopts the saved list
+        // from the sidecar — that is the whole point of the feature
+        let b = session_at(dir.path());
+        assert_eq!(b.servers(), ["https://a.example", "http://b.example"]);
+
+        // a session over a DIFFERENT dir is on its constructor default;
+        // `restore_sync_state` with an empty `servers` leaves it alone
+        let other = tempfile::tempdir().unwrap();
+        let mut c = session_at(other.path());
+        assert_eq!(c.servers(), ["http://unused.invalid"]);
+        c.restore_sync_state(&SyncState::default());
+        assert_eq!(c.servers(), ["http://unused.invalid"]);
+    }
+
+    #[test]
+    fn admission_filter_flags_an_inbound_proposal_and_rides_the_sync_state() {
+        let cdir = tempfile::tempdir().unwrap();
+        let wdir = tempfile::tempdir().unwrap();
+        let mut client = session_at(cdir.path());
+        let mut worker = session_at(wdir.path());
+
+        client
+            .propose(ProposeArgs {
+                counterparty: worker.pubkey_hex(),
+                from_introduction: None,
+                terms: terms("rust", 4.0, 30.0, "fix the flaky test"),
+            })
+            .unwrap();
+        let offer = client.outbox()[0].clone();
+        worker.ingest(std::slice::from_ref(&offer)).unwrap();
+
+        // no filter: the inbound proposal passes
+        assert_eq!(worker.admission_policy(), (None, None));
+        assert!(worker.negotiations()[0].passes_filter);
+
+        // a min-reputation threshold: the client is unknown-risk to the
+        // worker (no credit path), so the row is flagged — but still shown
+        worker.set_admission_policy(Some(1.0), None).unwrap();
+        let n = &worker.negotiations()[0];
+        assert!(!n.passes_filter);
+        assert!(!n.am_client && n.state == "negotiating");
+
+        // negative thresholds are refused
+        assert!(matches!(
+            worker.set_admission_policy(Some(-1.0), None),
+            Err(ClientError::Config(_))
+        ));
+
+        // it persists: a reopen over the same dir adopts it from the
+        // sidecar automatically
+        let snap = worker.sync_state();
+        assert_eq!(snap.admission.min_reputation, Some(1.0));
+        let w2 = session_at(wdir.path());
+        assert_eq!(w2.admission_policy(), (Some(1.0), None));
+
+        // the *client's* own view of the same proposal is never filtered —
+        // the gate is inbound only
+        assert!(client.negotiations()[0].passes_filter);
+    }
+
+    #[test]
+    fn position_limit_scales_with_the_requesters_recent_completed_volume() {
+        let cdir = tempfile::tempdir().unwrap();
+        let wdir = tempfile::tempdir().unwrap();
+        let client = Identity::generate();
+        let worker = Identity::generate();
+        let mut cs = Session::with_identity(
+            Identity::from_secret_bytes(client.secret_bytes()).unwrap(),
+            Box::new(EventStore::open(cdir.path()).unwrap()),
+            vec![],
+        );
+        let mut ws = Session::with_identity(
+            Identity::from_secret_bytes(worker.secret_bytes()).unwrap(),
+            Box::new(EventStore::open(wdir.path()).unwrap()),
+            vec![],
+        );
+
+        // A verified 10-Quant CreditIssuance worker -> client (worker is
+        // the issuer). Worker's bilateral net_position with client is -10
+        // (|10| of exposure), and client's recent completed volume is 10.
+        // The issuance is `p`-tagged to *client*, so it does not attach to
+        // the fresh client -> worker proposal, which stays `negotiating`.
+        let edge = credit(&worker, &client, 10.0);
+        cs.ingest(&edge).unwrap();
+        ws.ingest(&edge).unwrap();
+
+        // client sends a fresh proposal; worker holds it
+        cs.propose(ProposeArgs {
+            counterparty: worker.nostr_pubkey_hex(),
+            from_introduction: None,
+            terms: terms("rust", 4.0, 30.0, "more work"),
+        })
+        .unwrap();
+        let offer = cs.outbox().last().unwrap().clone();
+        ws.ingest(std::slice::from_ref(&offer)).unwrap();
+
+        let open = |s: &Session| {
+            s.negotiations()
+                .into_iter()
+                .find(|n| n.state == "negotiating")
+                .unwrap()
+        };
+
+        // limit = 1× client's recent volume (10) → ceiling 10 → |10| not
+        // over → admitted
+        ws.set_admission_policy(None, Some(1.0)).unwrap();
+        assert!(open(&ws).passes_filter);
+
+        // limit = 0.5× → ceiling 5 → |10| over → flagged
+        ws.set_admission_policy(None, Some(0.5)).unwrap();
+        assert!(!open(&ws).passes_filter);
+
+        // 0× → ceiling 0 → any standing imbalance flags — a fresh key with
+        // no completed work gets no exposure headroom at all
+        ws.set_admission_policy(None, Some(0.0)).unwrap();
+        assert!(!open(&ws).passes_filter);
     }
 
     // --- NIP-QW06 referral routing (Node in the client) -------------

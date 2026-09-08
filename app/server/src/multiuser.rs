@@ -85,6 +85,24 @@ pub async fn serve() {
         .filter(|s| !s.is_empty())
         .collect();
 
+    // The public host-default list lives in Postgres (host_config). Seed it
+    // from QW_SERVERS on first boot; after that the row is authoritative and
+    // QW_SERVERS is only a fallback if the row somehow goes missing.
+    if store
+        .host_servers()
+        .await
+        .unwrap_or_else(|e| panic!("read host_config: {e}"))
+        .is_none()
+    {
+        if let Ok(clean) = qw_client_core::clean_server_list(servers.clone()) {
+            store
+                .set_host_servers(&clean)
+                .await
+                .unwrap_or_else(|e| panic!("seed host_config: {e}"));
+            eprintln!("host_config seeded from QW_SERVERS: {clean:?}");
+        }
+    }
+
     let web = Arc::new(MuWeb::new(Arc::new(store), load_server_key(), servers));
     MuWeb::spawn_sweeper(web.clone());
 
@@ -310,6 +328,10 @@ pub fn router(web: Arc<MuWeb>) -> Router {
         .route("/api/profile_of", post(profile_of))
         .route("/api/trust", post(trust))
         .route("/api/net_position", post(net_position))
+        .route("/api/servers", post(servers))
+        .route("/api/set_servers", post(set_servers))
+        .route("/api/admission", post(admission))
+        .route("/api/set_admission", post(set_admission))
         .route("/session", get(session_info))
         .route("/api/kek_list", post(kek_list))
         .route("/api/kek_add", post(kek_add))
@@ -318,7 +340,58 @@ pub fn router(web: Arc<MuWeb>) -> Router {
         .route("/api/kek_flag", post(kek_flag))
         .route("/api/kek_recovery", post(kek_recovery))
         .route("/api/seed_export", post(seed_export))
+        .route("/servers", get(host_servers_get).post(host_servers_set))
         .with_state(web)
+}
+
+/// The public host-default coordination-server list — the "bootstrap"
+/// endpoint a fresh web client and the mobile app pull to seed their own
+/// list (`Session::bootstrap_servers`). Unauthenticated, `GET`, CORS-open.
+async fn host_servers_get(State(web): State<Arc<MuWeb>>) -> Response {
+    let list = web
+        .store
+        .host_servers()
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| web.servers.clone());
+    (
+        StatusCode::OK,
+        [("access-control-allow-origin", "*")],
+        Json(list),
+    )
+        .into_response()
+}
+
+/// Operator edit of the host default. Gated by a bearer token that must
+/// match `QW_ADMIN_TOKEN`; if that env var is unset, host-default editing
+/// is disabled and the seeded list stands.
+async fn host_servers_set(
+    State(web): State<Arc<MuWeb>>,
+    headers: HeaderMap,
+    Json(b): Json<SetServersBody>,
+) -> Response {
+    let Ok(token) = std::env::var("QW_ADMIN_TOKEN") else {
+        return (
+            StatusCode::FORBIDDEN,
+            "host-default editing is disabled (QW_ADMIN_TOKEN unset)",
+        )
+            .into_response();
+    };
+    let presented = headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "));
+    if presented != Some(token.as_str()) {
+        return (StatusCode::FORBIDDEN, "bad admin token").into_response();
+    }
+    match qw_client_core::clean_server_list(b.urls) {
+        Ok(clean) => match web.store.set_host_servers(&clean).await {
+            Ok(()) => (StatusCode::OK, Json(clean)).into_response(),
+            Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+        },
+        Err(e) => (StatusCode::UNPROCESSABLE_ENTITY, e.to_string()).into_response(),
+    }
 }
 
 /// Enough for the shared UI to decide whether to show the sign-in panel
@@ -328,7 +401,15 @@ async fn session_info(State(web): State<Arc<MuWeb>>, headers: HeaderMap) -> Resp
     let authed = web
         .resolve(&headers)
         .is_some_and(|live| !live.lock().unwrap().expired(Instant::now()));
-    (StatusCode::OK, Json(json!({ "multi_user": true, "authenticated": authed }))).into_response()
+    (
+        StatusCode::OK,
+        Json(json!({
+            "multi_user": true,
+            "authenticated": authed,
+            "version": env!("CARGO_PKG_VERSION"),
+        })),
+    )
+        .into_response()
 }
 
 async fn index() -> Html<&'static str> {
@@ -549,6 +630,70 @@ async fn trust(State(web): State<Arc<MuWeb>>, headers: HeaderMap, Json(b): Json<
 
 async fn net_position(State(web): State<Arc<MuWeb>>, headers: HeaderMap) -> Response {
     reply(with_session(web, headers, |s| Ok::<_, String>(s.net_position())).await)
+}
+
+/// The coordination servers this account syncs its mailbox against.
+async fn servers(State(web): State<Arc<MuWeb>>, headers: HeaderMap) -> Response {
+    reply(with_session(web, headers, |s| Ok::<_, String>(s.servers().to_vec())).await)
+}
+
+#[derive(Deserialize)]
+struct SetServersBody {
+    urls: Vec<String>,
+}
+/// Replace the coordination-server list. Folded into the account's sealed
+/// blob (`SyncState`), so it survives sign-out and a host restart.
+async fn set_servers(
+    State(web): State<Arc<MuWeb>>,
+    headers: HeaderMap,
+    Json(b): Json<SetServersBody>,
+) -> Response {
+    reply(
+        with_session(web, headers, move |s| {
+            s.set_servers(b.urls).map_err(text)?;
+            Ok::<_, String>(s.servers().to_vec())
+        })
+        .await,
+    )
+}
+
+fn admission_json(min: Option<f64>, lim: Option<f64>) -> serde_json::Value {
+    json!({ "min_reputation": min, "position_limit": lim })
+}
+
+/// The offer-time admission pre-filter (abstract.md §"Basic Use Cases").
+async fn admission(State(web): State<Arc<MuWeb>>, headers: HeaderMap) -> Response {
+    reply(
+        with_session(web, headers, |s| {
+            let (min, lim) = s.admission_policy();
+            Ok::<_, String>(admission_json(min, lim))
+        })
+        .await,
+    )
+}
+
+#[derive(Deserialize)]
+struct SetAdmissionBody {
+    #[serde(default)]
+    min_reputation: Option<f64>,
+    #[serde(default)]
+    position_limit: Option<f64>,
+}
+/// Configure that pre-filter; folded into the account's sealed blob.
+async fn set_admission(
+    State(web): State<Arc<MuWeb>>,
+    headers: HeaderMap,
+    Json(b): Json<SetAdmissionBody>,
+) -> Response {
+    reply(
+        with_session(web, headers, move |s| {
+            s.set_admission_policy(b.min_reputation, b.position_limit)
+                .map_err(text)?;
+            let (min, lim) = s.admission_policy();
+            Ok::<_, String>(admission_json(min, lim))
+        })
+        .await,
+    )
 }
 
 // --- KEK management (server/multi-user.md "KEK set") ----------------
@@ -1385,7 +1530,11 @@ mod tests {
         let app = router(web());
         let (st, before) = get(&app, "/session", None).await;
         assert_eq!(st, StatusCode::OK);
-        assert_eq!(before, json!({ "multi_user": true, "authenticated": false }));
+        assert_eq!(before["multi_user"], json!(true));
+        assert_eq!(before["authenticated"], json!(false));
+        // The deploy script asserts the running process is the one it just
+        // built by comparing this against app/server/Cargo.toml.
+        assert_eq!(before["version"], json!(env!("CARGO_PKG_VERSION")));
 
         let (_, _, sc) = call(
             &app,
@@ -1396,7 +1545,8 @@ mod tests {
         .await;
         let token = token_of(&sc.unwrap());
         let (_, after) = get(&app, "/session", Some(&token)).await;
-        assert_eq!(after, json!({ "multi_user": true, "authenticated": true }));
+        assert_eq!(after["multi_user"], json!(true));
+        assert_eq!(after["authenticated"], json!(true));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1596,6 +1746,25 @@ mod tests {
         }
         let reconstructed = Identity::from_secret_bytes(bytes).unwrap();
         assert_eq!(reconstructed.nostr_pubkey_hex(), id["pubkey"].as_str().unwrap());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn public_servers_endpoint_reads_the_db_and_the_admin_post_is_gated() {
+        let store = Arc::new(MemAccountStore::default());
+        store
+            .set_host_servers(&["https://relay.a".into(), "https://relay.b".into()])
+            .await
+            .unwrap();
+        let app = router(Arc::new(MuWeb::new(store, [8u8; SERVER_KEY_LEN], vec![])));
+
+        // unauthenticated read of the host default
+        let (st, body) = get(&app, "/servers", None).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(body, json!(["https://relay.a", "https://relay.b"]));
+
+        // POST is refused without QW_ADMIN_TOKEN set (it is not, in tests)
+        let (st, _, _) = call(&app, "/servers", None, json!({ "urls": ["https://x"] })).await;
+        assert_eq!(st, StatusCode::FORBIDDEN);
     }
 
     /// Drop every warm session, then confirm `nick` + `secret` opens a new one.

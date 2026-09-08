@@ -67,6 +67,9 @@ pub enum ClientError {
     Profile(profile::ProfileError),
     /// A negotiation step did not compose (`session::{propose,counter,accept}`).
     Negotiation(negotiation::NegotiationError),
+    /// A configuration value did not validate — e.g. the coordination-server
+    /// list handed to `session::set_servers`. The string names the problem.
+    Config(String),
 }
 
 impl std::fmt::Display for ClientError {
@@ -84,6 +87,7 @@ impl std::fmt::Display for ClientError {
             }
             ClientError::Profile(e) => write!(f, "{e}"),
             ClientError::Negotiation(e) => write!(f, "{e}"),
+            ClientError::Config(e) => write!(f, "{e}"),
         }
     }
 }
@@ -106,6 +110,37 @@ impl From<negotiation::NegotiationError> for ClientError {
     fn from(e: negotiation::NegotiationError) -> Self {
         ClientError::Negotiation(e)
     }
+}
+
+/// Trim, drop blanks, require every survivor to be an `http(s)://` URL,
+/// de-duplicate in first-seen order, and reject an empty result — a
+/// client with no coordination server can neither send nor collect mail.
+/// Shared by [`Session::set_servers`], `Session::bootstrap_servers` and
+/// the multi-user host's operator endpoint so all three agree.
+pub fn clean_server_list(urls: Vec<String>) -> Result<Vec<String>, ClientError> {
+    let mut clean: Vec<String> = Vec::new();
+    for raw in urls {
+        let url = raw.trim().to_string();
+        if url.is_empty() {
+            continue;
+        }
+        if !(url.starts_with("http://") || url.starts_with("https://")) {
+            return Err(ClientError::Config(format!(
+                "`{url}` is not an http(s) URL"
+            )));
+        }
+        if !clean.contains(&url) {
+            clean.push(url);
+        }
+    }
+    if clean.is_empty() {
+        return Err(ClientError::Config(
+            "at least one coordination server is required — a client with none \
+             cannot send or collect mail"
+                .into(),
+        ));
+    }
+    Ok(clean)
 }
 
 /// On-disk client state: one secret key, and nothing else that matters.
@@ -188,19 +223,35 @@ pub struct EventStore {
     events: Vec<Event>,
     ids: HashSet<String>,
     rejected: usize,
+    /// `dir/sync-state.json` — the outbox ids, poll cursors, configured
+    /// server list and admission policy. Written `0600` beside the ledger;
+    /// on the phone and a single-user host it is the equivalent of the
+    /// multi-user sealed blob's `sync` field.
+    sync_path: PathBuf,
+    sync_state: SyncState,
 }
 
 impl EventStore {
     /// Open the store in `dir`, loading and verifying what is already
     /// there. A missing file is an empty store, not an error — first run.
     pub fn open(dir: impl Into<PathBuf>) -> Result<Self, ClientError> {
-        let path = dir.into().join("events.jsonl");
+        let dir = dir.into();
         let mut store = Self {
-            path,
+            path: dir.join("events.jsonl"),
             events: Vec::new(),
             ids: HashSet::new(),
             rejected: 0,
+            sync_path: dir.join("sync-state.json"),
+            sync_state: SyncState::default(),
         };
+        // A corrupt or hand-edited sidecar is a fresh SyncState, not a
+        // failed open — the ledger is the source of truth, this only saves
+        // a re-download and keeps a configured server list.
+        if let Ok(raw) = fs::read_to_string(&store.sync_path) {
+            if let Ok(state) = serde_json::from_str::<SyncState>(&raw) {
+                store.sync_state = state;
+            }
+        }
         if !store.path.exists() {
             return Ok(store);
         }
@@ -309,6 +360,30 @@ impl HistoryStore for EventStore {
 
     fn rejected(&self) -> usize {
         EventStore::rejected(self)
+    }
+
+    fn loaded_sync_state(&self) -> SyncState {
+        self.sync_state.clone()
+    }
+
+    fn persist_sync_state(&mut self, state: &SyncState) -> Result<(), ClientError> {
+        if *state == self.sync_state {
+            return Ok(());
+        }
+        if let Some(parent) = self.sync_path.parent() {
+            fs::create_dir_all(parent)?;
+            restrict(parent, 0o700)?;
+        }
+        let json =
+            serde_json::to_string_pretty(state).map_err(|e| ClientError::Http(e.to_string()))?;
+        // Write-then-rename so a crash mid-write cannot leave a truncated
+        // sidecar (a bad one is survivable on load, but a lost one is not).
+        let tmp = self.sync_path.with_extension("json.tmp");
+        fs::write(&tmp, json.as_bytes())?;
+        restrict(&tmp, 0o600)?;
+        fs::rename(&tmp, &self.sync_path)?;
+        self.sync_state = state.clone();
+        Ok(())
     }
 }
 
@@ -809,6 +884,59 @@ mod tests {
         assert_eq!(ledger.push(&base, std::slice::from_ref(&ours)).unwrap(), 1);
         assert_eq!(ledger.push(&base, std::slice::from_ref(&ours)).unwrap(), 0);
         assert!(peer_store.0.lock().unwrap().iter().any(|e| e.id == ours.id));
+    }
+
+    #[test]
+    fn bootstrap_servers_pulls_a_hosts_list_and_persists_it() {
+        use axum::routing::get;
+
+        let app = Router::new().route(
+            "/servers",
+            get(|| async {
+                Json(vec![
+                    "  https://one.example  ".to_string(), // trimmed
+                    "https://two.example".to_string(),
+                    "https://one.example".to_string(), // deduped
+                ])
+            }),
+        );
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            rt.block_on(async move {
+                listener.set_nonblocking(true).unwrap();
+                let listener = tokio::net::TcpListener::from_std(listener).unwrap();
+                axum::serve(listener, app).await.unwrap();
+            });
+        });
+        std::thread::sleep(std::time::Duration::from_millis(150));
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = Session::open(
+            &Vault::at(dir.path()),
+            Box::new(EventStore::open(dir.path()).unwrap()),
+            vec!["https://default.invalid".to_string()],
+        )
+        .unwrap();
+
+        let adopted = s.bootstrap_servers(&format!("http://{addr}")).unwrap();
+        assert_eq!(adopted, ["https://one.example", "https://two.example"]);
+        assert_eq!(s.servers(), ["https://one.example", "https://two.example"]);
+
+        // it went through the sidecar — a fresh Session over the same dir
+        // comes back on the adopted list, not the constructor default
+        drop(s);
+        let s2 = Session::open(
+            &Vault::at(dir.path()),
+            Box::new(EventStore::open(dir.path()).unwrap()),
+            vec!["https://default.invalid".to_string()],
+        )
+        .unwrap();
+        assert_eq!(s2.servers(), ["https://one.example", "https://two.example"]);
     }
 }
 

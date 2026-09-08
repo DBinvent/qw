@@ -59,3 +59,26 @@ database:
                 type: bigint
                 constraint:
                   nullable: false
+
+      - table:
+          tableName: host_config
+          description: Singleton row - this qw-web instances default coordination-server list, served on GET /servers and pulled by fresh clients. Seeded from QW_SERVERS on first boot, then authoritative; editable at runtime with QW_ADMIN_TOKEN.
+          columns:
+            - column:
+                name: id
+                type: smallint
+                constraint:
+                  primaryKey: true
+                  nullable: false
+                description: Always 1 - there is one host_config row.
+            - column:
+                name: servers
+                type: jsonb
+                constraint:
+                  nullable: false
+                description: JSON array of http or https coordination-server URLs, in try order.
+            - column:
+                name: updated_at
+                type: bigint
+                constraint:
+                  nullable: false

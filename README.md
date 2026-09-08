@@ -1,4 +1,4 @@
-# QW knownby.work — Skills confirmed by the people you worked with. Found through friends of friends.
+# QW knownby.work — Skills confirmed by the people you worked with and for. Found through friends of friends.
 
 A referral-network protocol for trust-based work exchange, built on
 Nostr. See `todo-impl.md` for the implementation plan and current status.
