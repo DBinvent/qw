@@ -145,11 +145,11 @@
   /* Shown on every web deployment, signed in or not: this build keeps the
      signing key in server memory, which the Tauri app never does. Rose
      border so it reads as a caution, not a section. */
-  #web-disclaimer { border: 1px solid #fb7185; border-radius: .6rem;
+  .disclaimer { border: 1px solid #fb7185; border-radius: .6rem;
     padding: .8rem 1rem; margin: 0 0 1rem; font-size: 13px; line-height: 1.55;
     color: #fecdd3; background: #1a0f13; }
-  #web-disclaimer strong { color: #fb7185; }
-  #web-disclaimer a { color: inherit; }
+  .disclaimer strong { color: #fb7185; }
+  .disclaimer a { color: inherit; }
   /* Top navigation. The one page this file used to be is now six, shown one
      at a time; the rest carry [hidden]. */
   #topnav { display: flex; flex-wrap: wrap; gap: .4rem; margin: 0 0 1.25rem;
@@ -202,7 +202,7 @@
        is up: the hosted version generates and holds your key in server
        memory for the session, and that is a call to make before you
        register. Hidden once you are signed in. -->
-  <div id="web-disclaimer" hidden>
+  <div id="web-disclaimer" class="disclaimer" hidden>
     <strong>Hosted preview.</strong> This browser build keeps your signing
     key in the server's memory while you are signed in — it is not on your
     device, and whoever runs this host can reach it. Fine for trying QW.
@@ -649,6 +649,14 @@
   </section>
   <p class="muted" id="security-na" hidden>On this build the identity key is a
     file on a device you already control — there is nothing to manage here.</p>
+
+  <section id="about-section">
+    <div class="muted">This host and the build it is running. Compare the build
+      id against the latest commit to tell whether a deploy has landed.</div>
+    <div id="security-disclaimer" class="disclaimer"></div>
+    <p class="muted">qw-web <code id="about-version">—</code>
+      &nbsp;·&nbsp; build <code id="about-build">—</code></p>
+  </section>
   </div>
 
   </div>
@@ -2189,6 +2197,22 @@ async function authFetch(path, body) {
   return data;
 }
 
+// The Security tab's "about" block: which build this host is running, plus
+// the hosted-preview disclaimer shown at sign-in — same text, one source.
+function renderAbout(info) {
+  const v = document.getElementById('about-version');
+  const b = document.getElementById('about-build');
+  if (v) v.textContent = (info && info.version) || '—';
+  if (b) b.textContent = (info && info.build) || '—';
+  if (isWeb) {
+    const dst = document.getElementById('security-disclaimer');
+    const src = document.getElementById('web-disclaimer');
+    if (dst && src) dst.innerHTML = src.innerHTML;
+  }
+}
+
+let sessionInfo = null;
+
 async function boot() {
   // One probe up front: is this a login host, and are we already on a
   // valid cookie? It makes `multiUser` reliable even on a plain reload,
@@ -2196,8 +2220,8 @@ async function boot() {
   // path below.
   if (isWeb) {
     try {
-      const s = await fetch('/session', { credentials: 'same-origin' }).then((r) => r.json());
-      multiUser = !!s.multi_user;
+      sessionInfo = await fetch('/session', { credentials: 'same-origin' }).then((r) => r.json());
+      multiUser = !!sessionInfo.multi_user;
     } catch { /* fall back to the 401 path */ }
   }
   try {
@@ -2216,11 +2240,16 @@ async function boot() {
     document.getElementById('web-disclaimer').hidden = true;
     document.getElementById('signout-section').hidden = !multiUser;
     document.getElementById('security-na').hidden = multiUser;
+    // Security is always reachable on a web build now: alongside the keys
+    // (multi-user only) it carries the build id and the hosted-preview
+    // disclaimer, both worth having on every build.
+    if (isWeb) document.getElementById('nav-security').hidden = false;
+    renderAbout(sessionInfo);
     // Land on the last page visited; fall back to Identity, and never open
-    // Security when there is nothing to manage.
+    // Security when its tab is not available (the Tauri shell).
     let start = 'identity';
     try { start = localStorage.getItem('qw.page') || 'identity'; } catch { /* private mode */ }
-    if (start === 'security' && !multiUser) start = 'identity';
+    if (start === 'security' && document.getElementById('nav-security').hidden) start = 'identity';
     showPage(start);
   } catch (e) {
     if (isWeb && lastHttpStatus === 401) {

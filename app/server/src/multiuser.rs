@@ -412,6 +412,7 @@ async fn session_info(State(web): State<Arc<MuWeb>>, headers: HeaderMap) -> Resp
             "multi_user": true,
             "authenticated": authed,
             "version": env!("CARGO_PKG_VERSION"),
+            "build": env!("QW_WEB_BUILD"),
         })),
     )
         .into_response()

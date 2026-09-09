@@ -208,6 +208,7 @@ async fn session_info() -> Response {
             "multi_user": false,
             "authenticated": true,
             "version": env!("CARGO_PKG_VERSION"),
+            "build": env!("QW_WEB_BUILD"),
         })),
     )
         .into_response()
