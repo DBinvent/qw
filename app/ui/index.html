@@ -44,11 +44,27 @@
   .skills li { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem;
                padding: .55rem 0; border-top: 1px solid #27272a; }
   .skills li:first-child { border-top: 0; }
-  /* Skills are grouped by sector/domain (NIP-QW03) — this is the header
-     row for each group, not a skill. */
-  .skills li.group-head { display: block; padding: .7rem 0 .15rem; font-size: 11px;
-               letter-spacing: .08em; text-transform: uppercase; color: #71717a; }
-  .skills li.group-head:first-child { border-top: 0; }
+  /* Skills are grouped by sector/domain (NIP-QW03) into collapsible
+     panels — one <details> per group, wrapped in an <li>. Panels start
+     open only when the whole set is small (see renderGrouped); past that
+     they collapse, so a long profile stays scannable by field. */
+  .skills li.skill-group { display: block; padding: 0;
+               border-top: 1px solid #27272a; }
+  .skills li.skill-group:first-child { border-top: 0; }
+  .skills li.skill-group > details > summary {
+               list-style: none; cursor: pointer; display: flex;
+               align-items: center; gap: .5rem; padding: .7rem 0 .5rem;
+               font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+               color: #71717a; }
+  .skills li.skill-group > details > summary::-webkit-details-marker { display: none; }
+  .skills li.skill-group > details > summary::before {
+               content: "\25B8"; color: #52525b; font-size: 10px; }
+  .skills li.skill-group > details[open] > summary::before { content: "\25BE"; }
+  .skills li.skill-group .group-count {
+               margin-left: auto; text-transform: none; letter-spacing: 0;
+               font-size: 10px; color: #a1a1aa; border: 1px solid #27272a;
+               border-radius: 999px; padding: .1rem .45rem; }
+  .skills li.skill-group > details > ul.skills { margin: 0; padding-bottom: .35rem; }
   .skill-tag { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 13px;
                overflow-wrap: anywhere; margin-right: auto; }
   .badge { font-size: 11px; line-height: 1; padding: .32rem .5rem; border-radius: 999px;
@@ -746,16 +762,37 @@ function groupSkills(skills) {
   return [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0]));
 }
 
-// Render `skills` into `list` as group-header rows interleaved with skill
-// rows built by `rowFn`. Rebuilt from scratch each call.
+// Render `skills` into `list` (a <ul class="skills">) as one collapsible
+// <details> panel per group, each row built by `rowFn`. Rebuilt from
+// scratch each call. Panels open by default only when the whole set is
+// small — 2 groups or fewer with 5 items or fewer in each; past that they
+// start collapsed so a long list stays scannable by field.
 function renderGrouped(list, skills, rowFn) {
   list.textContent = '';
-  for (const [group, rows] of groupSkills(skills)) {
-    const head = document.createElement('li');
-    head.className = 'group-head';
-    head.textContent = group;
-    list.appendChild(head);
-    for (const s of rows) list.appendChild(rowFn(s));
+  const groups = groupSkills(skills);
+  const expand = groups.length <= 2 && groups.every(([, rows]) => rows.length <= 5);
+  for (const [group, rows] of groups) {
+    const li = document.createElement('li');
+    li.className = 'skill-group';
+
+    const panel = document.createElement('details');
+    panel.open = expand;
+
+    const summary = document.createElement('summary');
+    summary.textContent = group;
+    const count = document.createElement('span');
+    count.className = 'group-count';
+    count.textContent = rows.length;
+    summary.appendChild(count);
+    panel.appendChild(summary);
+
+    const inner = document.createElement('ul');
+    inner.className = 'skills';
+    for (const s of rows) inner.appendChild(rowFn(s));
+    panel.appendChild(inner);
+
+    li.appendChild(panel);
+    list.appendChild(li);
   }
 }
 
