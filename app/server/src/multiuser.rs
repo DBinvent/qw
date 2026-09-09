@@ -24,7 +24,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use qw_client_core::negotiation::{AcceptArgs, AnnotateArgs, CounterArgs, ProposeArgs};
 use qw_client_core::profile::ProfileEdit;
-use qw_client_core::{taxonomy, HttpMailbox, Session};
+use qw_client_core::{taxonomy, HttpMailbox, PropagationConfigWire, Session};
 use qw_protocol::identity::Identity;
 use rand::rngs::OsRng;
 use rand::RngCore;
@@ -332,6 +332,8 @@ pub fn router(web: Arc<MuWeb>) -> Router {
         .route("/api/set_servers", post(set_servers))
         .route("/api/admission", post(admission))
         .route("/api/set_admission", post(set_admission))
+        .route("/api/propagation", post(propagation))
+        .route("/api/set_propagation", post(set_propagation))
         .route("/session", get(session_info))
         .route("/api/kek_list", post(kek_list))
         .route("/api/kek_add", post(kek_add))
@@ -691,6 +693,28 @@ async fn set_admission(
                 .map_err(text)?;
             let (min, lim) = s.admission_policy();
             Ok::<_, String>(admission_json(min, lim))
+        })
+        .await,
+    )
+}
+
+/// The per-message-type broadcast propagation policy (NIP-QW14 §4).
+async fn propagation(State(web): State<Arc<MuWeb>>, headers: HeaderMap) -> Response {
+    reply(
+        with_session(web, headers, |s| Ok::<_, String>(s.propagation_config())).await,
+    )
+}
+
+/// Replace that table; folded into the account's sealed blob.
+async fn set_propagation(
+    State(web): State<Arc<MuWeb>>,
+    headers: HeaderMap,
+    Json(b): Json<PropagationConfigWire>,
+) -> Response {
+    reply(
+        with_session(web, headers, move |s| {
+            s.set_propagation_config(b).map_err(text)?;
+            Ok::<_, String>(s.propagation_config())
         })
         .await,
     )

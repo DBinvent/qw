@@ -33,7 +33,8 @@ use axum::{Json, Router};
 use qw_client_core::negotiation::{AcceptArgs, AnnotateArgs, CounterArgs, ProposeArgs};
 use qw_client_core::profile::ProfileEdit;
 use qw_client_core::{
-    taxonomy, EventStore, HttpMailbox, LedgerCoverage, PullResponse, ServerCandidate, Session, Vault,
+    taxonomy, EventStore, HttpMailbox, LedgerCoverage, PropagationConfigWire, PullResponse,
+    ServerCandidate, Session, Vault,
 };
 use qw_protocol::events::Event;
 use serde::Deserialize;
@@ -137,6 +138,8 @@ fn router(web: Arc<Web>) -> Router {
         .route("/api/set_servers", post(set_servers))
         .route("/api/admission", post(admission))
         .route("/api/set_admission", post(set_admission))
+        .route("/api/propagation", post(propagation))
+        .route("/api/set_propagation", post(set_propagation))
         .route("/servers", get(host_servers_get))
         .route("/ledger/pull", post(ledger_pull))
         .route("/ledger/push", post(ledger_push))
@@ -375,6 +378,27 @@ async fn set_admission(State(web): State<Arc<Web>>, Json(b): Json<SetAdmissionBo
                 .map_err(text)?;
             let (min, lim) = s.admission_policy();
             Ok::<_, String>(admission_json(min, lim))
+        })
+        .await,
+    )
+}
+
+/// The per-message-type broadcast propagation policy (NIP-QW14 §4) — the
+/// full resolved table.
+async fn propagation(State(web): State<Arc<Web>>) -> Response {
+    reply(on_session(web, |s| Ok::<_, String>(s.propagation_config())).await)
+}
+
+/// Replace that table. Body is a `PropagationConfigWire`
+/// (`{ proposal, demand, profile, news, review }`), each a full policy.
+async fn set_propagation(
+    State(web): State<Arc<Web>>,
+    Json(b): Json<PropagationConfigWire>,
+) -> Response {
+    reply(
+        on_session(web, move |s| {
+            s.set_propagation_config(b).map_err(text)?;
+            Ok::<_, String>(s.propagation_config())
         })
         .await,
     )

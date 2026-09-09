@@ -30,6 +30,8 @@ pub mod taxonomy;
 pub use session::{HistoryStore, KeyStore, LedgerView, Session, SyncState, SyncView};
 
 #[doc(inline)]
+pub use qw_node::broadcast::{PropagationConfigWire, PropagationPolicy};
+#[doc(inline)]
 pub use qw_node::ledger::{LedgerCoverage, LedgerSync, LedgerTransport, PullResponse};
 #[doc(inline)]
 pub use qw_node::server_registry::{rank_servers, RankedServer, ServerCandidate};

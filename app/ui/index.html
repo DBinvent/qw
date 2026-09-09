@@ -161,6 +161,13 @@
   #auth-note p { margin: .45rem 0; }
   #auth-note p:first-child { margin-top: 0; }
   #auth-note p:last-child { margin-bottom: 0; }
+  .prop-table { border-collapse: collapse; font-size: 12px; margin: .6rem 0; }
+  .prop-table th, .prop-table td { padding: .25rem .4rem; text-align: left; }
+  .prop-table thead th { color: #a1a1aa; font-weight: 600; text-transform: capitalize; }
+  .prop-table tbody th { color: #a1a1aa; font-weight: 500; white-space: nowrap; }
+  .prop-table input { width: 4.2rem; padding: .2rem .3rem; font-size: 12px;
+                      background: #09090b; border: 1px solid #27272a; border-radius: .3rem;
+                      color: #fafafa; }
 </style>
 </head>
 <body>
@@ -447,6 +454,24 @@
 
     <button id="filter-save">Save filter</button>
     <p class="muted" id="filter-status"></p>
+  </section>
+
+  <section>
+    <div class="muted"><strong>Broadcast propagation</strong> (NIP-QW14).
+      A <em>proposal</em> / <em>demand</em> / <em>profile</em> /
+      <em>news</em> / <em>review</em> you push travels hop to hop, and each
+      relaying node applies its own policy per message type: how far it
+      goes (<strong>hops</strong>), how old and how large it may be
+      (<strong>age</strong>, <strong>size</strong>), how many peers each
+      hop forwards it to (<strong>fan-out</strong>), the minimum folded
+      hop-score to keep relaying (<strong>score floor</strong>), how long
+      this node's own signed rating of an originator is reused before it is
+      recomputed (<strong>rating TTL</strong>), and a per-contact daily cap
+      (<strong>rate</strong>). These start at the stock NIP-QW14 §4
+      defaults; blank cells are ignored.</div>
+    <div style="overflow-x:auto"><table id="prop-table" class="prop-table"></table></div>
+    <button id="prop-save">Save propagation</button>
+    <p class="muted" id="prop-status"></p>
   </section>
   </div>
 
@@ -1380,7 +1405,74 @@ async function showFilter() {
     document.getElementById('filter-poslimit').value =
       p.position_limit == null ? '' : p.position_limit;
   } catch { /* not signed in yet */ }
+  try { renderProp(await invoke('propagation')); } catch { /* not signed in */ }
 }
+
+// --- broadcast propagation policy (NIP-QW14 §4) -----------------
+const PROP_KINDS = ['proposal', 'demand', 'profile', 'news', 'review'];
+// each field: how it maps between the wire (seconds/bytes) and the cell
+const PROP_FIELDS = [
+  { key: 'max_hops',            label: 'max hops',    to: v => v,          from: n => Math.round(n) },
+  { key: 'max_age_secs',        label: 'age (days)',  to: v => v / 86400,  from: n => Math.round(n * 86400) },
+  { key: 'max_bytes',           label: 'size (KiB)',  to: v => v / 1024,   from: n => Math.round(n * 1024) },
+  { key: 'fanout',              label: 'fan-out',     to: v => v,          from: n => Math.round(n) },
+  { key: 'min_hop_score',       label: 'score floor', to: v => v,          from: n => n },
+  { key: 'hop_rating_ttl_secs', label: 'rating TTL (days)', to: v => v / 86400, from: n => Math.round(n * 86400) },
+  { key: 'rate_per_day',        label: 'rate / day',  to: v => v,          from: n => Math.round(n) },
+];
+
+function renderProp(cfg) {
+  const t = document.getElementById('prop-table');
+  t.textContent = '';
+  const head = t.createTHead().insertRow();
+  head.appendChild(document.createElement('th'));
+  for (const k of PROP_KINDS) {
+    const th = document.createElement('th');
+    th.textContent = k;
+    head.appendChild(th);
+  }
+  const body = t.createTBody();
+  for (const f of PROP_FIELDS) {
+    const row = body.insertRow();
+    const th = document.createElement('th');
+    th.textContent = f.label;
+    row.appendChild(th);
+    for (const k of PROP_KINDS) {
+      const td = row.insertCell();
+      const inp = document.createElement('input');
+      inp.inputMode = 'decimal';
+      inp.id = `prop-${k}-${f.key}`;
+      const v = cfg[k] ? cfg[k][f.key] : undefined;
+      inp.value = v == null ? '' : String(+f.to(v).toFixed(2));
+      td.appendChild(inp);
+    }
+  }
+}
+
+document.getElementById('prop-save').onclick = async () => {
+  const status = document.getElementById('prop-status');
+  const wire = {};
+  for (const k of PROP_KINDS) {
+    const policy = {};
+    for (const f of PROP_FIELDS) {
+      const raw = document.getElementById(`prop-${k}-${f.key}`).value.trim();
+      const n = parseFloat(raw);
+      if (!raw || !Number.isFinite(n) || n < 0) {
+        status.textContent = `${k} · ${f.label}: needs a number ≥ 0.`;
+        return;
+      }
+      policy[f.key] = f.from(n);
+    }
+    wire[k] = policy;
+  }
+  status.textContent = 'Saving…';
+  try {
+    renderProp(await invoke('set_propagation', wire));
+    status.textContent = 'Saved. Applied to broadcasts this node originates or relays.';
+  } catch (e) {
+    status.textContent = String(e);
+  }
+};
 
 document.getElementById('filter-save').onclick = async () => {
   const status = document.getElementById('filter-status');

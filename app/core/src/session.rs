@@ -22,6 +22,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 
+use qw_node::broadcast::{PropagationConfig, PropagationConfigWire};
 use qw_node::ledger::{LedgerSync, LedgerTransport};
 use qw_node::node::{Delivery, FinalAnswer, Node};
 use qw_node::server_registry::{rank_servers, ServerCandidate};
@@ -153,6 +154,14 @@ pub struct SyncState {
     /// through [`Session::set_admission_policy`].
     #[serde(default)]
     pub admission: trust::AdmissionPolicy,
+    /// Per-message-type broadcast propagation policy (NIP-QW14 §4): how far
+    /// a `proposal` / `demand` / `profile` / `news` / `review` travels,
+    /// how large and old it may be, how wide each hop fans it out, the
+    /// score floor to keep relaying, and how long a hop rating is reused.
+    /// Stock defaults until edited; set through
+    /// [`Session::set_propagation_config`].
+    #[serde(default)]
+    pub propagation: PropagationConfig,
 }
 
 /// One client's live state. `Send` (so a shell can put it behind a
@@ -180,6 +189,9 @@ pub struct Session {
     /// Cases"). Default-empty: nothing is filtered until the user sets a
     /// threshold. Persisted with the rest of [`SyncState`].
     admission: trust::AdmissionPolicy,
+    /// Per-message-type broadcast propagation policy (NIP-QW14 §4). Stock
+    /// defaults until edited; persisted with the rest of [`SyncState`].
+    propagation: PropagationConfig,
 }
 
 impl Session {
@@ -216,6 +228,7 @@ impl Session {
             referral_results: BTreeMap::new(),
             servers,
             admission: trust::AdmissionPolicy::default(),
+            propagation: PropagationConfig::default(),
         };
         // Adopt whatever the store persisted last run (a sidecar file; the
         // multi-user host restores its sealed copy on top of this and they
@@ -307,6 +320,54 @@ impl Session {
             min_reputation,
             position_limit,
         };
+        let snapshot = self.sync_state();
+        self.history.persist_sync_state(&snapshot)?;
+        Ok(())
+    }
+
+    /// The per-message-type broadcast propagation policy (NIP-QW14 §4),
+    /// resolved to a full table — every type present, defaults where
+    /// nothing is overridden.
+    pub fn propagation_config(&self) -> PropagationConfigWire {
+        self.propagation.to_wire()
+    }
+
+    /// Replace that policy from a full table. Each field is range-checked;
+    /// folded into the persisted [`SyncState`]. A type left at its stock
+    /// values stores nothing.
+    pub fn set_propagation_config(
+        &mut self,
+        wire: PropagationConfigWire,
+    ) -> Result<(), ClientError> {
+        let check = |label: &str, p: &qw_node::broadcast::PropagationPolicy| -> Result<(), ClientError> {
+            let bad = |what: &str| {
+                Err(ClientError::Config(format!("{label}: {what}")))
+            };
+            if p.max_hops < 1 {
+                return bad("max_hops must be at least 1");
+            }
+            if p.fanout < 1 {
+                return bad("fanout must be at least 1");
+            }
+            if p.max_bytes < 256 {
+                return bad("max_bytes must be at least 256");
+            }
+            if p.max_age_secs == 0 || p.hop_rating_ttl_secs == 0 {
+                return bad("max_age and hop_rating_ttl must be more than zero");
+            }
+            if !p.min_hop_score.is_finite() || p.min_hop_score < 0.0 {
+                return bad("min_hop_score must be zero or more");
+            }
+            Ok(())
+        };
+        check("proposal", &wire.proposal)?;
+        check("demand", &wire.demand)?;
+        check("profile", &wire.profile)?;
+        check("news", &wire.news)?;
+        check("review", &wire.review)?;
+
+        self.propagation = PropagationConfig::from_wire(&wire);
+        *self.node.propagation_config_mut() = self.propagation.clone();
         let snapshot = self.sync_state();
         self.history.persist_sync_state(&snapshot)?;
         Ok(())
@@ -541,6 +602,7 @@ impl Session {
             cursors: self.sync.cursor_snapshot().into_iter().collect(),
             servers: self.servers.clone(),
             admission: self.admission,
+            propagation: self.propagation.clone(),
         }
     }
 
@@ -564,6 +626,8 @@ impl Session {
             self.servers = state.servers.clone();
         }
         self.admission = state.admission;
+        self.propagation = state.propagation.clone();
+        *self.node.propagation_config_mut() = self.propagation.clone();
     }
 
     /// Identity, invite link + QR, and one row per skill — declared
@@ -1529,6 +1593,7 @@ mod tests {
             cursors: Default::default(),
             servers: Vec::new(),
             admission: Default::default(),
+            propagation: Default::default(),
         });
         assert!(s.outbox().is_empty(), "an id with no matching event is skipped");
     }

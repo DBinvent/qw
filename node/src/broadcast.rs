@@ -14,6 +14,8 @@
 
 use std::collections::HashMap;
 
+use serde::{Deserialize, Serialize};
+
 use qw_protocol::events::kinds::{BroadcastKind, HopRating, HopScore};
 use qw_protocol::events::Event;
 
@@ -26,7 +28,7 @@ const DAY: u64 = 86_400;
 
 /// Local, unpublished — the counterpart of [`crate::contact::ContactPolicy`]
 /// for push traffic. One per [`BroadcastKind`].
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct PropagationPolicy {
     pub max_hops: u8,
     pub max_age_secs: u64,
@@ -64,7 +66,7 @@ pub fn default_policy(kind: BroadcastKind) -> PropagationPolicy {
 /// overridden. Persisted the same way [`crate::contact::ContactPolicy`]
 /// and NIP-QW13's `ReputationConfig` are (QW's client: the sealed
 /// `SyncState`).
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct PropagationConfig {
     overrides: HashMap<u8, PropagationPolicy>,
 }
@@ -89,6 +91,67 @@ impl PropagationConfig {
 
     pub fn set(&mut self, kind: BroadcastKind, policy: PropagationPolicy) {
         self.overrides.insert(kind_key(kind), policy);
+    }
+
+    /// The full per-type table, resolved (defaults where nothing is
+    /// overridden) — what a config UI reads and writes.
+    pub fn to_wire(&self) -> PropagationConfigWire {
+        PropagationConfigWire {
+            proposal: self.for_kind(BroadcastKind::Proposal),
+            demand: self.for_kind(BroadcastKind::Demand),
+            profile: self.for_kind(BroadcastKind::Profile),
+            news: self.for_kind(BroadcastKind::News),
+            review: self.for_kind(BroadcastKind::Review),
+        }
+    }
+
+    /// Store every type from the wire form. A field equal to
+    /// [`default_policy`] is dropped, so a config that was never touched
+    /// serializes back to nothing.
+    pub fn from_wire(wire: &PropagationConfigWire) -> Self {
+        let mut cfg = Self::default();
+        for (kind, policy) in [
+            (BroadcastKind::Proposal, wire.proposal),
+            (BroadcastKind::Demand, wire.demand),
+            (BroadcastKind::Profile, wire.profile),
+            (BroadcastKind::News, wire.news),
+            (BroadcastKind::Review, wire.review),
+        ] {
+            if policy != default_policy(kind) {
+                cfg.set(kind, policy);
+            }
+        }
+        cfg
+    }
+}
+
+/// The full per-message-type table — every type present, so a UI never has
+/// to know which defaults are in force. `PropagationConfig` serializes as
+/// this and deserializes from it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PropagationConfigWire {
+    pub proposal: PropagationPolicy,
+    pub demand: PropagationPolicy,
+    pub profile: PropagationPolicy,
+    pub news: PropagationPolicy,
+    pub review: PropagationPolicy,
+}
+
+impl Default for PropagationConfigWire {
+    fn default() -> Self {
+        PropagationConfig::default().to_wire()
+    }
+}
+
+impl Serialize for PropagationConfig {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        self.to_wire().serialize(s)
+    }
+}
+
+impl<'de> Deserialize<'de> for PropagationConfig {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        PropagationConfigWire::deserialize(d).map(|w| PropagationConfig::from_wire(&w))
     }
 }
 
@@ -271,6 +334,30 @@ mod tests {
         cfg.set(BroadcastKind::News, tight);
         assert_eq!(cfg.for_kind(BroadcastKind::News).max_hops, 2);
         assert_eq!(cfg.for_kind(BroadcastKind::Proposal).max_hops, 3);
+    }
+
+    #[test]
+    fn config_round_trips_through_its_wire_form() {
+        let mut cfg = PropagationConfig::default();
+        let mut tight = default_policy(BroadcastKind::News);
+        tight.max_hops = 2;
+        tight.min_hop_score = 1.3;
+        cfg.set(BroadcastKind::News, tight);
+
+        let json = serde_json::to_string(&cfg).unwrap();
+        assert!(json.contains("\"news\""), "wire form is the per-type table");
+        let back: PropagationConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.for_kind(BroadcastKind::News).max_hops, 2);
+        assert_eq!(back.for_kind(BroadcastKind::News).min_hop_score, 1.3);
+        assert_eq!(
+            back.for_kind(BroadcastKind::Proposal),
+            default_policy(BroadcastKind::Proposal)
+        );
+        // an untouched config serializes to the full default table and back
+        let d = PropagationConfig::default();
+        let d2: PropagationConfig =
+            serde_json::from_str(&serde_json::to_string(&d).unwrap()).unwrap();
+        assert!(d2.overrides.is_empty());
     }
 
     #[test]
