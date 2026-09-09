@@ -1,6 +1,6 @@
 [package]
 name = "qw-web"
-version = "0.1.9"
+version = "0.1.10"
 edition.workspace = true
 license.workspace = true
 description = "QW single-user web client: the same qw_client_core Session as the mobile app, served over HTTP for a personal host"

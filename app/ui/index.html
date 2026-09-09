@@ -344,16 +344,17 @@
     <div class="muted">Links to other networks — GitHub, LinkedIn, a personal
       site. Self-asserted, <strong>not evidence</strong>: somewhere a viewer
       can corroborate a claim by hand until a countersigned contract does it
-      for them.</div>
+      for them. Pick a network and type just your handle; or paste a link
+      and it recognises the network for you — anything it can't place stays
+      <em>custom</em>.</div>
     <div class="row">
-      <input id="link-network" placeholder="Network — github, linkedin, …"
-             autocapitalize="none" autocorrect="off" spellcheck="false" maxlength="40">
-    </div>
-    <div class="row">
-      <input id="link-url" placeholder="https://…" inputmode="url"
+      <select id="link-network" aria-label="Network"></select>
+      <span id="link-prefix" class="net" style="white-space:nowrap"></span>
+      <input id="link-handle" placeholder="username" style="flex:1"
              autocapitalize="none" autocorrect="off" spellcheck="false">
       <button id="link-add" type="button">Add</button>
     </div>
+    <p class="muted" id="link-preview" style="font-size:11px;min-height:1em"></p>
     <ul class="chips" id="link-chips"></ul>
   </section>
   </div>
@@ -964,51 +965,135 @@ document.getElementById('profile-add').onclick = () => {
   renderChips();
 };
 
-// Smart entry: paste a URL and the network fills itself in from the host.
-// Anything unrecognised stays "website".
-function networkFromUrl(u) {
-  let host = '';
-  try { host = new URL(u).hostname.replace(/^www\./, '').toLowerCase(); } catch { return ''; }
-  const map = {
-    'github.com': 'github', 'gitlab.com': 'gitlab', 'linkedin.com': 'linkedin',
-    'x.com': 'x', 'twitter.com': 'x', 'medium.com': 'medium',
-    'stackoverflow.com': 'stackoverflow', 'news.ycombinator.com': 'hn',
-  };
-  if (map[host]) return map[host];
-  if (host.endsWith('.medium.com')) return 'medium';
-  if (host.endsWith('.substack.com')) return 'substack';
-  if (u.includes('/@')) return 'mastodon';
-  return '';
-}
-document.getElementById('link-url').addEventListener('input', (e) => {
-  const net = document.getElementById('link-network');
-  const guess = networkFromUrl(e.target.value.trim());
-  if (guess && (!net.value.trim() || net.dataset.auto === '1')) {
-    net.value = guess;
-    net.dataset.auto = '1';
+// "Links to other networks": a network dropdown + a handle field.
+// Pick a network → type just the handle (the prefix is shown). Paste a
+// full link → the dropdown switches to the recognised network and the
+// handle is parsed out below. Unrecognised → stays "custom" (verbatim).
+const NETWORKS = [
+  { v: 'github',        label: 'GitHub',         prefix: 'github.com/',
+    hosts: ['github.com'],                       path: p => p[0] },
+  { v: 'gitlab',        label: 'GitLab',         prefix: 'gitlab.com/',
+    hosts: ['gitlab.com'],                       path: p => p[0] },
+  { v: 'linkedin',      label: 'LinkedIn',       prefix: 'linkedin.com/in/',
+    hosts: ['linkedin.com'],                     path: p => (p[0] === 'in' ? p[1] : p[0]) },
+  { v: 'x',             label: 'X',              prefix: 'x.com/',
+    hosts: ['x.com', 'twitter.com'],             path: p => p[0] },
+  { v: 'facebook',      label: 'Facebook',       prefix: 'facebook.com/',
+    hosts: ['facebook.com', 'fb.com'],           path: p => p[0] },
+  { v: 'medium',        label: 'Medium',         prefix: 'medium.com/@',
+    hosts: ['medium.com'],                       path: p => (p[0] || '').replace(/^@/, ''),
+    sub: h => h.endsWith('.medium.com') && h.slice(0, -'.medium.com'.length) },
+  { v: 'substack',      label: 'Substack',       prefix: '',
+    sub: h => h.endsWith('.substack.com') && h.slice(0, -'.substack.com'.length),
+    build: s => 'https://' + s + '.substack.com' },
+  { v: 'stackoverflow', label: 'Stack Overflow', prefix: 'stackoverflow.com/users/',
+    hosts: ['stackoverflow.com'],                path: p => (p[0] === 'users' ? p[1] : p[0]) },
+  { v: 'lightning',     label: 'Lightning',      prefix: '',
+    lnaddr: true,
+    build: a => { const [n, h] = a.split('@'); return `https://${h}/.well-known/lnurlp/${n}`; } },
+  { v: 'mastodon',      label: 'Mastodon',       prefix: '',
+    build: a => { const [u, h] = a.replace(/^@/, '').split('@'); return `https://${h}/@${u}`; },
+    parse: (host, p, raw) => (raw.includes('/@') && p[0] && p[0].startsWith('@')
+      ? p[0].slice(1) + '@' + host : null) },
+  { v: 'custom',        label: 'Custom — full URL', prefix: '' },
+];
+const netByV = Object.fromEntries(NETWORKS.map(n => [n.v, n]));
+
+(function fillNetworks() {
+  const sel = document.getElementById('link-network');
+  for (const n of NETWORKS) {
+    const o = document.createElement('option');
+    o.value = n.v; o.textContent = n.label;
+    sel.appendChild(o);
   }
-});
-document.getElementById('link-network').addEventListener('input', (e) => {
-  e.target.dataset.auto = '';  // user took over
+})();
+
+function linkNetState() {
+  return { sel: document.getElementById('link-network'),
+           handle: document.getElementById('link-handle'),
+           prefix: document.getElementById('link-prefix'),
+           preview: document.getElementById('link-preview') };
+}
+
+// Build the stored { network, url } for a network + handle. url is always
+// http(s) (the profile schema requires it).
+function buildLink(v, handle) {
+  const n = netByV[v];
+  handle = handle.trim();
+  if (!handle) return null;
+  if (v === 'custom') {
+    return /^https?:\/\//i.test(handle) ? { network: 'website', url: handle } : null;
+  }
+  if (n.lnaddr || v === 'mastodon') {
+    if (!/^@?[^@\s]+@[^@\s]+\.[^@\s]+$/.test(handle)) return null;
+    return { network: v, url: n.build(handle) };
+  }
+  if (n.build) return { network: v, url: n.build(handle) };
+  return { network: v, url: 'https://' + n.prefix + handle.replace(/^@+/, '') };
+}
+
+// Try to place a pasted string. Returns { v, handle } or null.
+function parseLink(raw) {
+  raw = raw.trim();
+  if (/^lnurl1[a-z0-9]+$/i.test(raw)) return null; // not storable as http(s) yet
+  if (/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(raw) && !raw.includes('://')) {
+    return { v: 'lightning', handle: raw };
+  }
+  let host = '', segs = [];
+  try {
+    const url = new URL(raw);
+    host = url.hostname.replace(/^www\./, '').toLowerCase();
+    segs = url.pathname.split('/').filter(Boolean);
+  } catch { return null; }
+  for (const n of NETWORKS) {
+    if (n.sub) { const s = n.sub(host); if (s) return { v: n.v, handle: s }; }
+    if (n.hosts && n.hosts.includes(host) && n.path) {
+      const h = n.path(segs);
+      if (h) return { v: n.v, handle: h };
+    }
+    if (n.parse) { const h = n.parse(host, segs, raw); if (h) return { v: n.v, handle: h }; }
+  }
+  return null;
+}
+
+function refreshLinkRow() {
+  const { sel, handle, prefix, preview } = linkNetState();
+  const n = netByV[sel.value];
+  prefix.textContent = n.prefix || '';
+  handle.placeholder = sel.value === 'custom' ? 'https://…'
+                     : n.lnaddr ? 'you@wallet.com'
+                     : n.v === 'mastodon' ? 'user@instance.social' : 'username';
+  const built = buildLink(sel.value, handle.value);
+  preview.textContent = built ? '→ ' + built.url : (handle.value.trim() ? '(not a valid entry yet)' : '');
+}
+
+document.getElementById('link-network').addEventListener('change', refreshLinkRow);
+document.getElementById('link-handle').addEventListener('input', (e) => {
+  const v = e.target.value.trim();
+  const looksPasted = /^https?:\/\//i.test(v) || /^lnurl1/i.test(v) || (v.includes('@') && v.includes('.') && !v.includes(' '));
+  if (looksPasted) {
+    const hit = parseLink(v);
+    if (hit) { document.getElementById('link-network').value = hit.v; e.target.value = hit.handle; }
+    else { document.getElementById('link-network').value = 'custom'; }  // leave it custom, verbatim
+  }
+  refreshLinkRow();
 });
 
 document.getElementById('link-add').onclick = () => {
-  const net = document.getElementById('link-network');
-  const url = document.getElementById('link-url');
+  const { sel, handle } = linkNetState();
   const status = document.getElementById('profile-status');
-  const u = url.value.trim();
-  if (!u) return;
-  if (!/^https?:\/\//i.test(u)) {
-    status.textContent = 'A link has to start with http:// or https://.';
+  const built = buildLink(sel.value, handle.value);
+  if (!built) {
+    status.textContent = sel.value === 'custom'
+      ? 'A custom link must be a full http(s) URL.'
+      : 'Enter your handle for ' + netByV[sel.value].label + '.';
     return;
   }
-  if (!profileLinks.some((l) => l.url === u)) {
-    profileLinks.push({ network: net.value.trim() || networkFromUrl(u) || 'website', url: u });
-  }
-  net.value = '';
-  net.dataset.auto = '';
-  url.value = '';
+  if (!profileLinks.some((l) => l.url === built.url)) profileLinks.push(built);
+  handle.value = '';
+  sel.value = 'github';
   status.textContent = '';
+  refreshLinkRow();
   renderLinkChips();
 };
 

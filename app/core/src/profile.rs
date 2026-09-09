@@ -33,8 +33,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::taxonomy;
 
-/// `/taxonomy.yaml`'s own rule: "Max 5 skill tags".
-pub const MAX_TAGS: usize = 5;
+/// NIP-QW03: a profile carries **fewer than 80** skill tags — the same
+/// bound `qw_protocol::events::kinds::ProfileSkillTags::validate` enforces.
+/// (The bundled taxonomy has far fewer leaves than this today; the cap is
+/// the protocol limit, not a local style choice.)
+pub const MAX_TAGS: usize = qw_protocol::events::MAX_PROFILE_SKILLS - 1;
+/// Longest a single skill tag may be, in characters (NIP-QW03: `< 80`).
+pub const MAX_TAG_LEN: usize = qw_protocol::events::MAX_SKILL_TAG_LEN - 1;
 /// A profile carries a handful of links, not a link farm.
 pub const MAX_LINKS: usize = 8;
 
@@ -124,7 +129,7 @@ impl std::fmt::Display for ProfileError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ProfileError::TooMany(n) => {
-                write!(f, "{n} tags — the taxonomy allows at most {MAX_TAGS}")
+                write!(f, "{n} tags — a profile carries fewer than {} (NIP-QW03)", MAX_TAGS + 1)
             }
             ProfileError::Empty => write!(f, "a profile needs at least one skill tag"),
             ProfileError::Tag { input, reason } => write!(f, "`{input}`: {reason}"),
@@ -232,6 +237,12 @@ pub fn build_signed(
     }
     if skill_tags.len() > MAX_TAGS {
         return Err(ProfileError::TooMany(skill_tags.len()));
+    }
+    if let Some(t) = skill_tags.iter().find(|t| t.chars().count() > MAX_TAG_LEN) {
+        return Err(ProfileError::Tag {
+            input: t.clone(),
+            reason: format!("a skill tag is at most {MAX_TAG_LEN} characters"),
+        });
     }
 
     let mut links: Vec<ExternalLink> = Vec::new();
@@ -460,24 +471,19 @@ mod tests {
     }
 
     #[test]
-    fn rejects_more_than_five() {
-        let err = build_signed(
-            &id(),
-            &[],
-            &edit_of(
-                None,
-                &[
-                    "it/backend/languages#rust",
-                    "it/backend/languages#go",
-                    "it/backend/languages#python",
-                    "it/backend/languages#java",
-                    "it/backend/languages#kotlin",
-                    "it/backend/languages#ruby",
-                ],
-            ),
-        )
-        .unwrap_err();
-        assert_eq!(err, ProfileError::TooMany(6));
+    fn tag_count_cap_is_the_nip_qw03_limit_not_five() {
+        assert_eq!(MAX_TAGS, 79, "NIP-QW03: fewer than 80 per profile");
+        let all: Vec<&str> = taxonomy::leaves().iter().map(String::as_str).collect();
+        // 6 distinct leaves used to be rejected; now they are fine.
+        assert!(build_signed(&id(), &[], &edit_of(None, &all[..6])).is_ok());
+        if all.len() > MAX_TAGS {
+            // MAX_TAGS + 1 distinct leaves are rejected as TooMany.
+            let over: Vec<&str> = all[..MAX_TAGS + 1].to_vec();
+            assert_eq!(
+                build_signed(&id(), &[], &edit_of(None, &over)).unwrap_err(),
+                ProfileError::TooMany(MAX_TAGS + 1)
+            );
+        }
     }
 
     #[test]
