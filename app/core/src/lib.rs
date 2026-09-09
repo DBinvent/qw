@@ -27,7 +27,7 @@ pub mod profile;
 pub mod session;
 pub mod taxonomy;
 
-pub use session::{HistoryStore, KeyStore, LedgerView, Session, SyncState, SyncView};
+pub use session::{Bureau, ClientPrefs, HistoryStore, KeyStore, LedgerView, Session, SyncState, SyncView};
 
 #[doc(inline)]
 pub use qw_node::broadcast::{PropagationConfigWire, PropagationPolicy};

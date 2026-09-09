@@ -78,9 +78,11 @@ pub const KIND_CHAIN_CALCULATION_RESULT: u16 = 9090;
 // --- bulletin listing (NIP-QW11) ---
 pub const KIND_BULLETIN_LISTING: u16 = 9091;
 
+// --- skill recognition, by a bureau (NIP-QW15) ---
+pub const KIND_RECOGNITION_REQUEST: u16 = 9092;
+pub const KIND_RECOGNITION: u16 = 9093;
+
 // --- broadcast propagation (NIP-QW14) ---
-// 9100+ — leaving 9092-9099 for the coordination-server attestation NIP
-// still being drafted (`qw-bo`).
 pub const KIND_BROADCAST: u16 = 9100;
 pub const KIND_HOP_RATING: u16 = 9101;
 
@@ -1225,6 +1227,77 @@ pub fn hop_rating(hop_pubkey_hex: &str, rating: &HopRating) -> UnsignedEvent {
         KIND_HOP_RATING,
         tags,
         serde_json::to_string(rating).expect("HopRating serializes"),
+    )
+}
+
+// --- skill recognition, by a bureau (NIP-QW15) ---
+
+/// A subject asks a bureau to corroborate skills against their QW work
+/// record (and, with `append_public_profile`, a parse of profiles the
+/// bureau has verified they control). `skill_tags` may be empty.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct RecognitionRequest {
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub skill_tags: Vec<String>,
+    #[serde(default)]
+    pub append_public_profile: bool,
+}
+
+/// How strong the evidence behind one endorsed / suggested skill is —
+/// mirrors the NIP-QW03 evidence classes. `QwEntitled` is a contract
+/// settled through a credit issuance (NIP-QW02); `SideSettled` a closed
+/// contract with nothing on the ledger (NIP-QW01 kind 9006); `Profile` an
+/// external-profile parse.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EvidenceTier {
+    QwEntitled,
+    SideSettled,
+    Profile,
+}
+
+/// One skill the bureau will endorse or suggest, with a plain-language
+/// note on what backs it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Corroboration {
+    pub skill_tag: String,
+    pub corroborated_by: String,
+    pub tier: EvidenceTier,
+}
+
+/// The bureau's signed reply (kind 9093). Corroboration, not
+/// certification: it says what it checked and by what method, never "this
+/// person is legit".
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct Recognition {
+    pub subject_pubkey: String,
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub endorsements: Vec<Corroboration>,
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub suggestions: Vec<Corroboration>,
+    /// Listed tags the bureau found no evidence for.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub unverified: Vec<String>,
+    /// Profile findings that mapped to no taxonomy tag.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub unmapped: Vec<String>,
+    pub checked_at: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<u64>,
+}
+
+/// Build a `RecognitionRequest` event addressed to `bureau_pubkey_hex`.
+/// The requester is the subject — recognition is always about yourself.
+pub fn recognition_request(
+    subject_pubkey_hex: &str,
+    bureau_pubkey_hex: &str,
+    request: &RecognitionRequest,
+) -> UnsignedEvent {
+    UnsignedEvent::new(
+        subject_pubkey_hex,
+        KIND_RECOGNITION_REQUEST,
+        vec![p_tag(bureau_pubkey_hex)],
+        serde_json::to_string(request).expect("RecognitionRequest serializes"),
     )
 }
 

@@ -28,8 +28,9 @@ use qw_node::node::{Delivery, FinalAnswer, Node};
 use qw_node::server_registry::{rank_servers, ServerCandidate};
 use qw_node::sync::{MailboxSync, MailboxTransport};
 use qw_protocol::events::{
-    now as unix_now, tag_domain, Event, ExternalLink, Introduction, SkillAnswer, SkillSource,
-    KIND_INTRODUCTION, KIND_PROFILE, KIND_SKILL_ANSWER, KIND_SKILL_QUERY,
+    now as unix_now, recognition_request, tag_domain, Event, ExternalLink, Introduction,
+    Recognition, RecognitionRequest, SkillAnswer, SkillSource, KIND_INTRODUCTION, KIND_PROFILE,
+    KIND_SKILL_ANSWER, KIND_SKILL_QUERY,
 };
 use qw_protocol::identity::Identity;
 use qw_protocol::{invite, trust};
@@ -162,6 +163,37 @@ pub struct SyncState {
     /// [`Session::set_propagation_config`].
     #[serde(default)]
     pub propagation: PropagationConfig,
+    /// Local client preferences that are not protocol — the bureaus this
+    /// identity trusts for skill recognition (NIP-QW15) and how it defaults
+    /// the request. Set through [`Session::set_client_prefs`].
+    #[serde(default)]
+    pub client_prefs: ClientPrefs,
+}
+
+/// One bureau this identity trusts for skill recognition (NIP-QW15), with
+/// a weight it is read at — treated like any other node: `> 1` amplify,
+/// `1` neutral, `< 1` attenuate, `0` ignore.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Bureau {
+    pub url: String,
+    #[serde(default = "default_bureau_trust")]
+    pub trust: f64,
+}
+
+fn default_bureau_trust() -> f64 {
+    0.8
+}
+
+/// Non-protocol client config. Persisted with [`SyncState`].
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ClientPrefs {
+    /// Trusted recognition bureaus, in preference order.
+    #[serde(default)]
+    pub bureaus: Vec<Bureau>,
+    /// Default state of the "also parse my public profiles" flag on a
+    /// recognition request.
+    #[serde(default)]
+    pub recognition_append_default: bool,
 }
 
 /// One client's live state. `Send` (so a shell can put it behind a
@@ -192,6 +224,8 @@ pub struct Session {
     /// Per-message-type broadcast propagation policy (NIP-QW14 §4). Stock
     /// defaults until edited; persisted with the rest of [`SyncState`].
     propagation: PropagationConfig,
+    /// Trusted recognition bureaus + request defaults (NIP-QW15).
+    client_prefs: ClientPrefs,
 }
 
 impl Session {
@@ -229,6 +263,7 @@ impl Session {
             servers,
             admission: trust::AdmissionPolicy::default(),
             propagation: PropagationConfig::default(),
+            client_prefs: ClientPrefs::default(),
         };
         // Adopt whatever the store persisted last run (a sidecar file; the
         // multi-user host restores its sealed copy on top of this and they
@@ -285,6 +320,65 @@ impl Session {
             .map_err(|e| ClientError::Http(format!("{url}: {e}")))?;
         self.set_servers(list)?;
         Ok(self.servers.clone())
+    }
+
+    /// Ask a bureau at `bureau_url` to corroborate `skill_tags` against
+    /// this identity's QW work record (NIP-QW15). Signs a kind-9092
+    /// request with the session key, POSTs it to
+    /// `{bureau_url}/attestation/recognition`, verifies the bureau's
+    /// signed kind-9093 reply against the key it advertises at
+    /// `{bureau_url}/attestation/bureau`, and returns it. Nothing is
+    /// published or stored — the caller decides what to accept.
+    pub fn request_recognition(
+        &self,
+        bureau_url: &str,
+        skill_tags: Vec<String>,
+        append_public_profile: bool,
+    ) -> Result<Recognition, ClientError> {
+        let base = bureau_url.trim_end_matches('/');
+        let http = reqwest::blocking::Client::new();
+
+        let bureau_pubkey: String = {
+            let v: serde_json::Value = http
+                .get(format!("{base}/attestation/bureau"))
+                .send()
+                .and_then(|r| r.error_for_status())
+                .and_then(|r| r.json())
+                .map_err(|e| ClientError::Http(format!("{base}/attestation/bureau: {e}")))?;
+            v.get("pubkey")
+                .and_then(|p| p.as_str())
+                .unwrap_or_default()
+                .to_string()
+        };
+        if bureau_pubkey.is_empty() {
+            return Err(ClientError::Http("bureau did not return an identity".into()));
+        }
+
+        let request = RecognitionRequest {
+            skill_tags,
+            append_public_profile,
+        };
+        let signed = recognition_request(&self.pubkey_hex(), &bureau_pubkey, &request)
+            .sign(&self.identity);
+
+        let reply: Event = http
+            .post(format!("{base}/attestation/recognition"))
+            .json(&signed)
+            .send()
+            .and_then(|r| r.error_for_status())
+            .and_then(|r| r.json())
+            .map_err(|e| ClientError::Http(format!("{base}/attestation/recognition: {e}")))?;
+
+        reply
+            .verify()
+            .map_err(|e| ClientError::Http(format!("bureau reply does not verify: {e}")))?;
+        if reply.pubkey != bureau_pubkey {
+            return Err(ClientError::Http(
+                "bureau reply signed by a different key than it advertises".into(),
+            ));
+        }
+        serde_json::from_str::<Recognition>(&reply.content)
+            .map_err(|e| ClientError::Http(format!("bureau reply content: {e}")))
     }
 
     /// The offer-time admission pre-filter as configured —
@@ -368,6 +462,34 @@ impl Session {
 
         self.propagation = PropagationConfig::from_wire(&wire);
         *self.node.propagation_config_mut() = self.propagation.clone();
+        let snapshot = self.sync_state();
+        self.history.persist_sync_state(&snapshot)?;
+        Ok(())
+    }
+
+    /// Trusted recognition bureaus + request defaults (NIP-QW15).
+    pub fn client_prefs(&self) -> ClientPrefs {
+        self.client_prefs.clone()
+    }
+
+    /// Replace them. Each bureau `url` must be `http(s)` and each `trust`
+    /// finite and `>= 0`; folded into the persisted [`SyncState`].
+    pub fn set_client_prefs(&mut self, prefs: ClientPrefs) -> Result<(), ClientError> {
+        for b in &prefs.bureaus {
+            if !b.url.starts_with("http://") && !b.url.starts_with("https://") {
+                return Err(ClientError::Config(format!(
+                    "bureau url must start with http:// or https://: {}",
+                    b.url
+                )));
+            }
+            if !b.trust.is_finite() || b.trust < 0.0 {
+                return Err(ClientError::Config(format!(
+                    "bureau trust must be zero or more: {}",
+                    b.url
+                )));
+            }
+        }
+        self.client_prefs = prefs;
         let snapshot = self.sync_state();
         self.history.persist_sync_state(&snapshot)?;
         Ok(())
@@ -603,6 +725,7 @@ impl Session {
             servers: self.servers.clone(),
             admission: self.admission,
             propagation: self.propagation.clone(),
+            client_prefs: self.client_prefs.clone(),
         }
     }
 
@@ -628,6 +751,7 @@ impl Session {
         self.admission = state.admission;
         self.propagation = state.propagation.clone();
         *self.node.propagation_config_mut() = self.propagation.clone();
+        self.client_prefs = state.client_prefs.clone();
     }
 
     /// Identity, invite link + QR, and one row per skill — declared
@@ -1594,6 +1718,7 @@ mod tests {
             servers: Vec::new(),
             admission: Default::default(),
             propagation: Default::default(),
+            client_prefs: Default::default(),
         });
         assert!(s.outbox().is_empty(), "an id with no matching event is skipped");
     }

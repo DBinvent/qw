@@ -168,6 +168,14 @@
   .prop-table input { width: 4.2rem; padding: .2rem .3rem; font-size: 12px;
                       background: #09090b; border: 1px solid #27272a; border-radius: .3rem;
                       color: #fafafa; }
+  .prop-table label { display: inline-flex; flex-direction: column; gap: .2rem;
+                      margin: .3rem .6rem .3rem 0; font-size: 11px; color: #a1a1aa; }
+  details.cfg { border: 1px solid #27272a; border-radius: .5rem; margin: .5rem 0; }
+  details.cfg > summary { cursor: pointer; padding: .6rem .8rem; font-weight: 600;
+                          list-style-position: inside; }
+  details.cfg[open] > summary { border-bottom: 1px solid #27272a; }
+  details.cfg > section { padding: .3rem .8rem .7rem; }
+  #bureau-list .row { align-items: center; margin: .3rem 0; }
 </style>
 </head>
 <body>
@@ -313,6 +321,26 @@
   </section>
 
   <section>
+    <div class="muted"><strong>Ask a bureau to review your skills</strong>
+      (NIP-QW15). A bureau checks the tags you have published against your
+      countersigned QW work record and signs what it can stand behind —
+      <em>corroboration, not certification</em>. Nothing is published; you
+      decide what to keep.</div>
+    <div class="row">
+      <input id="rec-bureau" placeholder="Bureau URL"
+             value="https://dash.knownby.work" inputmode="url"
+             autocapitalize="none" autocorrect="off" spellcheck="false">
+      <button id="rec-go" type="button">Request recognition</button>
+    </div>
+    <label class="muted" style="display:block;margin:.4rem 0">
+      <input type="checkbox" id="rec-append"> also let the bureau parse the
+      public profiles it has verified I control
+    </label>
+    <p class="muted" id="rec-status"></p>
+    <div id="rec-result"></div>
+  </section>
+
+  <section>
     <div class="muted">Links to other networks — GitHub, LinkedIn, a personal
       site. Self-asserted, <strong>not evidence</strong>: somewhere a viewer
       can corroborate a claim by hand until a countersigned contract does it
@@ -423,6 +451,12 @@
 
   <!-- ===================== FILTER ===================== -->
   <div class="page" data-page="filter" hidden>
+  <p class="muted">Every knob this client has. Each group opens for the full
+    explanation. Some are wired; some are shown as <span class="badge">not
+    implemented</span> so the surface matches what the mobile app will
+    carry.</p>
+
+  <details class="cfg" open><summary>Inbound proposal filter</summary>
   <section>
     <div class="muted">Two local pre-filters run on every inbound proposal
       before you look at it (abstract.md, "Basic Use Cases"). A proposal
@@ -430,49 +464,96 @@
       hidden, and you can always admit it anyway. Both thresholds are
       private: a declined party is never told which one it failed, or that
       either is set. Leave a field blank to turn that check off.</div>
-
     <p class="muted"><strong>Minimum reputation</strong> — your trust-path
-      score for the requester in this skill area (abstract.md, "Web of
-      Trust"): the Quant value on the closing edge of the shortest verified
-      credit-issuance path from you to them, halved for each hop of
-      distance. No such path is <em>unknown-risk</em>, which is below any
-      threshold — a fresh key is unknown-risk, not neutral. Each Contracts
-      row shows this number for its counterparty, to calibrate against.</p>
-    <p><input id="filter-minrep" inputmode="decimal"
-              placeholder="e.g. 5 — blank = off"></p>
-
+      score for the requester in this skill area: the Quant value on the
+      closing edge of the shortest verified credit-issuance path from you to
+      them, halved per hop. No such path is <em>unknown-risk</em>, below any
+      threshold.</p>
+    <p><input id="filter-minrep" inputmode="decimal" placeholder="e.g. 5 — blank = off"></p>
     <p class="muted"><strong>Position limit</strong> — a
-      <strong>multiplier</strong> of how much verified work the requester
-      has completed in the last 90 days (abstract.md: the ceiling "scales
-      with how much work that counterparty has recently completed").
-      <code>1.0</code> lets a proposal push your running balance with them
-      up to one times their recent output; <code>0</code> allows none, and
-      someone with no recent completed work has an effective ceiling of
-      zero.</p>
-    <p><input id="filter-poslimit" inputmode="decimal"
-              placeholder="e.g. 1.5 — blank = off"></p>
-
+      <strong>multiplier</strong> of the requester's verified completed work
+      in the last 90 days. <code>1.0</code> lets a proposal push your
+      balance with them up to one times their recent output; <code>0</code>
+      none.</p>
+    <p><input id="filter-poslimit" inputmode="decimal" placeholder="e.g. 1.5 — blank = off"></p>
     <button id="filter-save">Save filter</button>
     <p class="muted" id="filter-status"></p>
   </section>
+  </details>
 
+  <details class="cfg"><summary>Bureaus you trust <span class="badge contract">NIP-QW15</span></summary>
   <section>
-    <div class="muted"><strong>Broadcast propagation</strong> (NIP-QW14).
-      A <em>proposal</em> / <em>demand</em> / <em>profile</em> /
-      <em>news</em> / <em>review</em> you push travels hop to hop, and each
-      relaying node applies its own policy per message type: how far it
-      goes (<strong>hops</strong>), how old and how large it may be
-      (<strong>age</strong>, <strong>size</strong>), how many peers each
-      hop forwards it to (<strong>fan-out</strong>), the minimum folded
-      hop-score to keep relaying (<strong>score floor</strong>), how long
-      this node's own signed rating of an originator is reused before it is
-      recomputed (<strong>rating TTL</strong>), and a per-contact daily cap
-      (<strong>rate</strong>). These start at the stock NIP-QW14 §4
-      defaults; blank cells are ignored.</div>
+    <div class="muted">A bureau reviews your skills against your
+      countersigned work record and signs what it can stand behind
+      (Profile tab → "Ask a bureau to review your skills"). List the ones
+      you trust with a <strong>weight</strong>, read like any other node:
+      <code>&gt;1</code> amplify, <code>1</code> neutral, <code>&lt;1</code>
+      attenuate, <code>0</code> ignore. The Profile button uses the first
+      entry by default.</div>
+    <div id="bureau-list"></div>
+    <div class="row">
+      <input id="bureau-url" placeholder="https://bureau.example" inputmode="url"
+             autocapitalize="none" autocorrect="off" spellcheck="false">
+      <input id="bureau-trust" inputmode="decimal" placeholder="trust — 0.8" style="width:5rem">
+      <button id="bureau-add" type="button">Add</button>
+    </div>
+    <button id="bureau-save">Save bureaus</button>
+    <p class="muted" id="bureau-status"></p>
+  </section>
+  </details>
+
+  <details class="cfg"><summary>Broadcast propagation <span class="badge contract">NIP-QW14</span></summary>
+  <section>
+    <div class="muted">A <em>proposal</em> / <em>demand</em> /
+      <em>profile</em> / <em>news</em> / <em>review</em> you push travels
+      hop to hop; each relaying node applies a per-type policy — how far it
+      goes (<strong>hops</strong>), how old / large it may be
+      (<strong>age</strong>, <strong>size</strong>), how wide each hop fans
+      it out (<strong>fan-out</strong>), the minimum folded hop-score to
+      keep relaying (<strong>score floor</strong>), how long this node's
+      signed rating of an originator is reused (<strong>rating TTL</strong>),
+      and a per-contact daily cap (<strong>rate</strong>). Stock NIP-QW14 §4
+      defaults until changed.</div>
     <div style="overflow-x:auto"><table id="prop-table" class="prop-table"></table></div>
     <button id="prop-save">Save propagation</button>
     <p class="muted" id="prop-status"></p>
   </section>
+  </details>
+
+  <details class="cfg"><summary>Reputation scoring
+    <span class="badge">not implemented</span> <span class="badge contract">NIP-QW13</span></summary>
+  <section>
+    <div class="muted">The configurable per-domain scoring model
+      (NIP-QW13 §1) — <code>tolerance</code>, rating / completion / quant
+      weights, recency half-life, <code>side_settled_factor</code>
+      (a contract with no credit issuance, NIP-QW01 kind 9006),
+      <code>mf2_weight</code> (a direct contact's judgment of someone you
+      distrust nudges their score, §2b), scope inheritance and the path
+      knobs. <strong>Not built yet</strong> — <code>qw_protocol::trust</code>
+      still uses the single-path magnitude score. Shown so the surface is
+      visible.</div>
+    <div class="prop-table">
+      <label>side_settled_factor <input value="0.6" disabled></label>
+      <label>mf2_weight <input value="0.1" disabled></label>
+      <label>rating_weight <input value="—" disabled></label>
+      <label>quant_weight <input value="—" disabled></label>
+      <label>recency_halflife <input value="—" disabled></label>
+      <label>scope: parent_of <input value="0.5" disabled></label>
+    </div>
+  </section>
+  </details>
+
+  <details class="cfg"><summary>Skill limits <span class="badge contract">NIP-QW03</span></summary>
+  <section>
+    <div class="muted">Enforced by the protocol on every profile: a skill
+      tag is <strong>1–79 characters</strong> and a profile carries
+      <strong>fewer than 80</strong> of them. Fixed, not editable.</div>
+    <div class="prop-table">
+      <label>max tag length <input value="79" disabled></label>
+      <label>max tags per profile <input value="79" disabled></label>
+    </div>
+  </section>
+  </details>
   </div>
 
   <!-- ===================== MAIL ===================== -->
@@ -745,10 +826,10 @@ function renderLinks(links) {
 // The user assembles a list of `{tag, level}` and a list of
 // `{network, url}`. The taxonomy resolves anything typed (synonyms and
 // all) inside profile_set, so a bad entry comes back as an error naming
-// it rather than being dropped. Max five skills, matching the taxonomy's
-// own rule; `source` is left off — only commit-analysis sets it, and that
+// it rather than being dropped. NIP-QW03: fewer than 80 skills, each
+// 1-79 chars; `source` is left off — only commit-analysis sets it, and that
 // producer is not wired yet.
-const MAX_TAGS = 5;
+const MAX_TAGS = 79;  // NIP-QW03: fewer than 80 per profile
 const LEVELS = ['beginner', 'intermediate', 'senior', 'expert'];
 let profileSkills = [];   // [{ tag, level: string|null }]
 let profileLinks = [];    // [{ network, url }]
@@ -883,6 +964,34 @@ document.getElementById('profile-add').onclick = () => {
   renderChips();
 };
 
+// Smart entry: paste a URL and the network fills itself in from the host.
+// Anything unrecognised stays "website".
+function networkFromUrl(u) {
+  let host = '';
+  try { host = new URL(u).hostname.replace(/^www\./, '').toLowerCase(); } catch { return ''; }
+  const map = {
+    'github.com': 'github', 'gitlab.com': 'gitlab', 'linkedin.com': 'linkedin',
+    'x.com': 'x', 'twitter.com': 'x', 'medium.com': 'medium',
+    'stackoverflow.com': 'stackoverflow', 'news.ycombinator.com': 'hn',
+  };
+  if (map[host]) return map[host];
+  if (host.endsWith('.medium.com')) return 'medium';
+  if (host.endsWith('.substack.com')) return 'substack';
+  if (u.includes('/@')) return 'mastodon';
+  return '';
+}
+document.getElementById('link-url').addEventListener('input', (e) => {
+  const net = document.getElementById('link-network');
+  const guess = networkFromUrl(e.target.value.trim());
+  if (guess && (!net.value.trim() || net.dataset.auto === '1')) {
+    net.value = guess;
+    net.dataset.auto = '1';
+  }
+});
+document.getElementById('link-network').addEventListener('input', (e) => {
+  e.target.dataset.auto = '';  // user took over
+});
+
 document.getElementById('link-add').onclick = () => {
   const net = document.getElementById('link-network');
   const url = document.getElementById('link-url');
@@ -894,9 +1003,10 @@ document.getElementById('link-add').onclick = () => {
     return;
   }
   if (!profileLinks.some((l) => l.url === u)) {
-    profileLinks.push({ network: net.value.trim() || 'website', url: u });
+    profileLinks.push({ network: net.value.trim() || networkFromUrl(u) || 'website', url: u });
   }
   net.value = '';
+  net.dataset.auto = '';
   url.value = '';
   status.textContent = '';
   renderLinkChips();
@@ -918,6 +1028,72 @@ document.getElementById('profile-save').onclick = async () => {
     await showProfile();
     await showIdentity();
     status.textContent = 'Published.';
+  } catch (e) {
+    status.textContent = String(e);
+  }
+};
+
+// --- ask a bureau to review your skills (NIP-QW15) ---------------
+const TIER_GLYPH = {
+  qw_entitled: '◆ credit-backed', side_settled: '◈ side-settled', profile: '○ profile',
+};
+
+function renderRecognition(r) {
+  const out = document.getElementById('rec-result');
+  out.textContent = '';
+  const block = (title, cls, rows) => {
+    if (!rows || !rows.length) return;
+    const h = document.createElement('div');
+    h.className = 'muted'; h.style.marginTop = '.6rem';
+    h.innerHTML = '<strong>' + title + '</strong>';
+    out.appendChild(h);
+    const ul = document.createElement('ul');
+    ul.className = 'skills';
+    for (const c of rows) {
+      const li = document.createElement('li');
+      const tag = document.createElement('span');
+      tag.className = 'skill-tag'; tag.textContent = c.skill_tag;
+      li.appendChild(tag);
+      if (c.tier) li.appendChild(badge(TIER_GLYPH[c.tier] || c.tier, cls));
+      if (c.corroborated_by) {
+        const by = document.createElement('span');
+        by.className = 'muted'; by.style.fontSize = '11px';
+        by.textContent = ' — ' + c.corroborated_by;
+        li.appendChild(by);
+      }
+      ul.appendChild(li);
+    }
+    out.appendChild(ul);
+  };
+  block('Endorsed', 'contract', r.endorsements);
+  block('Suggested', 'algo', r.suggestions);
+  for (const [label, arr] of [['No evidence found', r.unverified], ['Unmapped', r.unmapped]]) {
+    if (arr && arr.length) {
+      const p = document.createElement('p');
+      p.className = 'muted'; p.style.fontSize = '12px';
+      p.textContent = label + ': ' + arr.join('; ');
+      out.appendChild(p);
+    }
+  }
+}
+
+document.getElementById('rec-go').onclick = async () => {
+  const status = document.getElementById('rec-status');
+  document.getElementById('rec-result').textContent = '';
+  const bureau = document.getElementById('rec-bureau').value.trim();
+  if (!bureau) { status.textContent = 'Enter a bureau URL.'; return; }
+  status.textContent = 'Requesting…';
+  try {
+    const r = await invoke('request_recognition', {
+      bureau_url: bureau,
+      skill_tags: profileSkills.map((s) => s.tag),
+      append_public_profile: document.getElementById('rec-append').checked,
+    });
+    renderRecognition(r);
+    const until = r.expires_at
+      ? ' · valid until ' + new Date(r.expires_at * 1000).toLocaleDateString() : '';
+    status.textContent =
+      'Signed by the bureau' + until + '. Nothing published — copy what you want into your tags above.';
   } catch (e) {
     status.textContent = String(e);
   }
@@ -1406,7 +1582,58 @@ async function showFilter() {
       p.position_limit == null ? '' : p.position_limit;
   } catch { /* not signed in yet */ }
   try { renderProp(await invoke('propagation')); } catch { /* not signed in */ }
+  try {
+    bureaus = (await invoke('client_prefs')).bureaus || [];
+    renderBureaus();
+    // the Profile recognition field mirrors your first configured bureau
+    if (bureaus[0]) document.getElementById('rec-bureau').value = bureaus[0].url;
+  } catch { /* not signed in */ }
 }
+
+// --- bureaus you trust (NIP-QW15) -------------------------------
+let bureaus = [];  // [{ url, trust }]
+function renderBureaus() {
+  const box = document.getElementById('bureau-list');
+  box.textContent = '';
+  bureaus.forEach((b, i) => {
+    const row = document.createElement('div');
+    row.className = 'row';
+    const u = document.createElement('input'); u.value = b.url; u.style.flex = '1';
+    u.oninput = () => { bureaus[i].url = u.value.trim(); };
+    const t = document.createElement('input'); t.value = b.trust; t.inputMode = 'decimal';
+    t.style.width = '5rem';
+    t.oninput = () => { bureaus[i].trust = parseFloat(t.value); };
+    const x = document.createElement('button'); x.type = 'button'; x.textContent = '×';
+    x.onclick = () => { bureaus.splice(i, 1); renderBureaus(); };
+    row.append(u, t, x);
+    box.appendChild(row);
+  });
+}
+document.getElementById('bureau-add').onclick = () => {
+  const url = document.getElementById('bureau-url').value.trim();
+  const trust = parseFloat(document.getElementById('bureau-trust').value) || 0.8;
+  if (!/^https?:\/\//i.test(url)) {
+    document.getElementById('bureau-status').textContent = 'URL must start with http:// or https://.';
+    return;
+  }
+  if (!bureaus.some((b) => b.url === url)) bureaus.push({ url, trust });
+  document.getElementById('bureau-url').value = '';
+  document.getElementById('bureau-trust').value = '';
+  document.getElementById('bureau-status').textContent = '';
+  renderBureaus();
+};
+document.getElementById('bureau-save').onclick = async () => {
+  const status = document.getElementById('bureau-status');
+  status.textContent = 'Saving…';
+  try {
+    const p = await invoke('set_client_prefs', {
+      bureaus: bureaus.map((b) => ({ url: b.url, trust: Number.isFinite(b.trust) ? b.trust : 0.8 })),
+    });
+    bureaus = p.bureaus || [];
+    renderBureaus();
+    status.textContent = 'Saved. The Profile recognition button uses the first one.';
+  } catch (e) { status.textContent = String(e); }
+};
 
 // --- broadcast propagation policy (NIP-QW14 §4) -----------------
 const PROP_KINDS = ['proposal', 'demand', 'profile', 'news', 'review'];

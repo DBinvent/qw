@@ -24,7 +24,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use qw_client_core::negotiation::{AcceptArgs, AnnotateArgs, CounterArgs, ProposeArgs};
 use qw_client_core::profile::ProfileEdit;
-use qw_client_core::{taxonomy, HttpMailbox, PropagationConfigWire, Session};
+use qw_client_core::{taxonomy, ClientPrefs, HttpMailbox, PropagationConfigWire, Session};
 use qw_protocol::identity::Identity;
 use rand::rngs::OsRng;
 use rand::RngCore;
@@ -317,6 +317,7 @@ pub fn router(web: Arc<MuWeb>) -> Router {
         .route("/api/taxonomy_leaves", post(taxonomy_leaves))
         .route("/api/profile_get", post(profile_get))
         .route("/api/profile_set", post(profile_set))
+        .route("/api/request_recognition", post(request_recognition))
         .route("/api/negotiations", post(negotiations))
         .route("/api/propose", post(propose))
         .route("/api/counter", post(counter))
@@ -334,6 +335,8 @@ pub fn router(web: Arc<MuWeb>) -> Router {
         .route("/api/set_admission", post(set_admission))
         .route("/api/propagation", post(propagation))
         .route("/api/set_propagation", post(set_propagation))
+        .route("/api/client_prefs", post(client_prefs))
+        .route("/api/set_client_prefs", post(set_client_prefs))
         .route("/session", get(session_info))
         .route("/api/kek_list", post(kek_list))
         .route("/api/kek_add", post(kek_add))
@@ -524,6 +527,29 @@ async fn profile_set(
     reply(with_session(web, headers, move |s| s.set_profile(b.edit).map_err(text)).await)
 }
 
+#[derive(Deserialize)]
+struct RequestRecognitionBody {
+    bureau_url: String,
+    #[serde(default)]
+    skill_tags: Vec<String>,
+    #[serde(default)]
+    append_public_profile: bool,
+}
+/// Ask a bureau to corroborate skills (NIP-QW15). Nothing is stored.
+async fn request_recognition(
+    State(web): State<Arc<MuWeb>>,
+    headers: HeaderMap,
+    Json(b): Json<RequestRecognitionBody>,
+) -> Response {
+    reply(
+        with_session(web, headers, move |s| {
+            s.request_recognition(&b.bureau_url, b.skill_tags, b.append_public_profile)
+                .map_err(text)
+        })
+        .await,
+    )
+}
+
 async fn negotiations(State(web): State<Arc<MuWeb>>, headers: HeaderMap) -> Response {
     reply(with_session(web, headers, |s| Ok::<_, String>(s.negotiations())).await)
 }
@@ -702,6 +728,23 @@ async fn set_admission(
 async fn propagation(State(web): State<Arc<MuWeb>>, headers: HeaderMap) -> Response {
     reply(
         with_session(web, headers, |s| Ok::<_, String>(s.propagation_config())).await,
+    )
+}
+
+async fn client_prefs(State(web): State<Arc<MuWeb>>, headers: HeaderMap) -> Response {
+    reply(with_session(web, headers, |s| Ok::<_, String>(s.client_prefs())).await)
+}
+async fn set_client_prefs(
+    State(web): State<Arc<MuWeb>>,
+    headers: HeaderMap,
+    Json(b): Json<ClientPrefs>,
+) -> Response {
+    reply(
+        with_session(web, headers, move |s| {
+            s.set_client_prefs(b).map_err(text)?;
+            Ok::<_, String>(s.client_prefs())
+        })
+        .await,
     )
 }
 

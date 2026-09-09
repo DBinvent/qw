@@ -38,6 +38,7 @@ evidence, so it moved to the **replaceable** band at `10020` (mirroring
 | 9091 | Bulletin listing | [NIP-QW11](./NIP-QW11-bulletin-listing.md) | `qw_protocol::events::kinds`, `qw_server` |
 | — | Personal ledger replication (no new kind) | [NIP-QW12](./NIP-QW12-ledger-sync.md) | `qw_node::ledger` (core built; HTTP transport open) |
 | — | Reputation scoring & propagation (no new kind) | [NIP-QW13](./NIP-QW13-reputation-scoring.md) | `qw_protocol::trust` (single-path magnitude score today; the configurable model in the spec is staged) |
+| 9092-9093 | Skill recognition by a bureau — signed corroboration of a subject's skills against their QW record | [NIP-QW15](./NIP-QW15-skill-recognition.md) | `qw_protocol::events::kinds`, `qw_server::attestation`, `qw_client_core` |
 | 9100-9101 | Broadcast propagation — echomail-style multi-hop push (`proposal` / `demand` / `profile` / `news` / `review`), signed per-hop scores cached for days, policy per message type | [NIP-QW14](./NIP-QW14-broadcast-propagation.md) | `qw_protocol::events::kinds` (kinds + builders done; relay mechanics staged) |
 
 ## Conventions shared across all QW kinds
