@@ -1,12 +1,12 @@
 // "Get updates and news" signup.
 //
-// Generated file — the source of truth is
+// Generated file - the source of truth is
 // ../../user_mgmt/web/components/news/subscribe-form.tsx. Edit it there and
 // re-run `user_mgmt/web/sync.sh <this-app>`.
 //
 // Shape follows trust-atria-landing's WaitlistFooter: one field, one button,
 // the form replaced by a confirmation on success. What differs is what the
-// confirmation *says* — this list is double opt-in, so the address is not
+// confirmation *says* - this list is double opt-in, so the address is not
 // subscribed until the emailed link is clicked, and telling someone they are
 // "on the list" before that would be a lie.
 
@@ -55,7 +55,7 @@ export function SubscribeForm({
           role="status"
           className="mt-4 rounded-md border border-success/40 bg-success/10 px-3 py-2 text-sm text-success"
         >
-          Check your email and click the link to confirm — we will not send anything until you do.
+          Check your email and click the link to confirm - we will not send anything until you do.
         </div>
       ) : (
         <form onSubmit={onSubmit} className="mt-4 flex flex-col gap-2 sm:flex-row">
@@ -77,8 +77,8 @@ export function SubscribeForm({
           <button
             type="submit"
             disabled={pending}
-            className="h-10 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground
-                       transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+            className="h-10 rounded-md btn-accent px-4 text-sm
+                       transition disabled:cursor-not-allowed"
           >
             {pending ? 'Subscribing…' : 'Subscribe'}
           </button>

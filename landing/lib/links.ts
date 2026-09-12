@@ -1,9 +1,9 @@
-// Outbound links, in one place — the header, hero and footer all pointed at
+// Outbound links, in one place - the header, hero and footer all pointed at
 // the repo separately before, so a change meant editing three files.
 //
 // `DBinvent/qw` went public 2026-08-24, so "View source" resolves for a
 // visitor. If it ever goes private again, point SOURCE_URL at ABSTRACT_URL
-// and relabel — a private repo makes the site's most prominent button a 404.
+// and relabel - a private repo makes the site's most prominent button a 404.
 export const GITHUB_URL = 'https://github.com/DBinvent/qw'
 
 // Design docs live in the GitHub Pages repo, rendered on github.com.
@@ -16,8 +16,8 @@ export const SOURCE_LABEL = 'View source'
 
 // The hosted browser build of the client: multi-user `qw-web` behind the
 // shared tunnel. It composes and displays exactly what the Android app
-// does — profile, introductions, the job lifecycle, referral queries,
-// trust reads, dispute annotations — but the key it generates lives in
+// does - profile, introductions, the job lifecycle, referral queries,
+// trust reads, dispute annotations - but the key it generates lives in
 // server memory while you are signed in, not on your device. That is a
 // preview, not the trust-anchoring client, and the page says so itself.
 export const WEB_UI_URL = 'https://qw.knownby.work'
@@ -30,7 +30,7 @@ export const REPO_README_URL = `${REPO_BLOB}/README.md`
 export const APP_README_URL = `${REPO_BLOB}/app/README.md`
 export const nipUrl = (file: string) => `${REPO_BLOB}/protocol/nips/${file}`
 
-// The Android build. Binaries are not in this repo — an APK is a build
+// The Android build. Binaries are not in this repo - an APK is a build
 // output, not source, and in git it bloats every clone forever while still
 // only reaching a visitor when the site redeploys.
 //
@@ -43,7 +43,7 @@ export const nipUrl = (file: string) => `${REPO_BLOB}/protocol/nips/${file}`
 // also a site deploy, and left the page able to be wrong about its own
 // checksum in between. Same shape as the Atria eval kit
 // (`atria-eval.json` + `atria-eval-latest.tar.gz`) and RDBM's downloads
-// list — three projects, one convention.
+// list - three projects, one convention.
 const DOWNLOADS_BASE = 'https://app.knownby.work'
 
 /** Shape of that manifest. Written by the publish step, never by hand. */
@@ -61,20 +61,20 @@ export type AndroidRelease = {
  * redirects to the current versioned file (see `src/worker.ts`).
  *
  * Deliberately *not* `-latest.apk`. That symlink is served with
- * `max-age=300, must-revalidate` so it can track releases — correct for a
+ * `max-age=300, must-revalidate` so it can track releases - correct for a
  * pointer, ruinous for 18 MB of payload, which would then revalidate at the
  * edge on every download. The redirect is what is short-lived; its target is
  * the versioned name, cached immutably for a year.
  */
 export const ANDROID_APK_URL = '/download/android'
 
-/** The exact file for a resolved release — immutable, and what a client
+/** The exact file for a resolved release - immutable, and what a client
  *  with JavaScript should link to directly, skipping the redirect hop. */
 export const androidFileUrl = (release: AndroidRelease) =>
   `${DOWNLOADS_BASE}/${release.file}`
 
 /**
- * Read at view time for the facts a download page should state — version,
+ * Read at view time for the facts a download page should state - version,
  * size, checksum. Served `Access-Control-Allow-Origin: *` by the origin,
  * since everything under it is a public download anyway.
  */

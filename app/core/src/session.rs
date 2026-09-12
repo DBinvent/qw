@@ -28,8 +28,9 @@ use qw_node::node::{Delivery, FinalAnswer, Node};
 use qw_node::server_registry::{rank_servers, ServerCandidate};
 use qw_node::sync::{MailboxSync, MailboxTransport};
 use qw_protocol::events::{
-    now as unix_now, recognition_request, tag_domain, Event, ExternalLink, Introduction,
-    Recognition, RecognitionRequest, SkillAnswer, SkillSource, KIND_INTRODUCTION, KIND_PROFILE,
+    broadcast_carry, now as unix_now, recognition_request, tag_domain, Broadcast, BroadcastCarry,
+    BroadcastKind, Event, ExternalLink, Introduction, Recognition, RecognitionRequest, SkillAnswer,
+    SkillSource, KIND_BROADCAST, KIND_BROADCAST_CARRY, KIND_INTRODUCTION, KIND_PROFILE,
     KIND_SKILL_ANSWER, KIND_SKILL_QUERY,
 };
 use qw_protocol::identity::Identity;
@@ -39,7 +40,9 @@ use serde::{Deserialize, Serialize};
 use crate::negotiation::{
     self, AcceptArgs, AnnotateArgs, CounterArgs, NegotiationView, ProposeArgs,
 };
-use crate::profile::{self, ProfileEdit, ProfileView};
+use crate::profile::{
+    self, FieldView, NameEdit, ProfileEdit, ProfileFieldEdit, ProfileLocal, ProfileView,
+};
 use crate::{follow_invite, invite_qr_svg, ClientError};
 
 /// Default relay-query reach — NIP-QW06 §3's default is 3.
@@ -168,6 +171,11 @@ pub struct SyncState {
     /// the request. Set through [`Session::set_client_prefs`].
     #[serde(default)]
     pub client_prefs: ClientPrefs,
+    /// Free-text profile prose (headline, bio) with a per-field
+    /// visibility, held locally; the `Public` ones are mirrored into the
+    /// signed profile on `set_profile`. See `app/profile-fields.md`.
+    #[serde(default)]
+    pub profile_local: ProfileLocal,
 }
 
 /// One bureau this identity trusts for skill recognition (NIP-QW15), with
@@ -226,6 +234,11 @@ pub struct Session {
     propagation: PropagationConfig,
     /// Trusted recognition bureaus + request defaults (NIP-QW15).
     client_prefs: ClientPrefs,
+    /// Free-text profile prose (headline, bio) held on the device with a
+    /// per-field visibility. `Public` fields are mirrored into the signed
+    /// kind-10020 on `set_profile`; the rest stay here. Persisted with the
+    /// rest of [`SyncState`]. See `app/profile-fields.md`.
+    profile_local: ProfileLocal,
 }
 
 impl Session {
@@ -264,6 +277,7 @@ impl Session {
             admission: trust::AdmissionPolicy::default(),
             propagation: PropagationConfig::default(),
             client_prefs: ClientPrefs::default(),
+            profile_local: ProfileLocal::default(),
         };
         // Adopt whatever the store persisted last run (a sidecar file; the
         // multi-user host restores its sealed copy on top of this and they
@@ -677,6 +691,39 @@ impl Session {
                         out.push(delivery_event(d));
                     }
                 }
+                KIND_BROADCAST_CARRY if e.first_tag_value("p") == Some(me.as_str()) => {
+                    let Ok(carry) = serde_json::from_str::<BroadcastCarry>(&e.content) else {
+                        continue;
+                    };
+                    let events = self.history.events().to_vec();
+                    let my = me.clone();
+                    let weights = trust::ScoringWeights::default();
+                    let our_trust = |pk: &str| {
+                        trust::find_trust_path(&events, &my, pk, TRUST_MAX_HOPS, None)
+                            .map(|p| trust::score_trust_path(&p, &weights))
+                    };
+                    let outcome = self.node.receive_broadcast(
+                        &e.pubkey,
+                        &carry.envelope,
+                        &carry.ratings,
+                        &carry.path,
+                        now,
+                        &our_trust,
+                    );
+                    if let Some(held) = &outcome.held {
+                        let _ = self.history.append(std::slice::from_ref(held));
+                    }
+                    for d in &outcome.deliveries {
+                        let fwd = BroadcastCarry {
+                            envelope: d.envelope.clone(),
+                            ratings: d.ratings.clone(),
+                            path: d.path.clone(),
+                        };
+                        out.push(
+                            broadcast_carry(&me, &d.to, &fwd).sign(&self.identity),
+                        );
+                    }
+                }
                 _ => {}
             }
         }
@@ -726,6 +773,7 @@ impl Session {
             admission: self.admission,
             propagation: self.propagation.clone(),
             client_prefs: self.client_prefs.clone(),
+            profile_local: self.profile_local.clone(),
         }
     }
 
@@ -752,6 +800,7 @@ impl Session {
         self.propagation = state.propagation.clone();
         *self.node.propagation_config_mut() = self.propagation.clone();
         self.client_prefs = state.client_prefs.clone();
+        self.profile_local = state.profile_local.clone();
     }
 
     /// Identity, invite link + QR, and one row per skill — declared
@@ -960,6 +1009,126 @@ impl Session {
             .unwrap_or(&[])
     }
 
+    /// Post that this identity is **open to work** — looking for a new
+    /// project across some or all of its profile skills (NIP-QW14, carried
+    /// internally as the `demand`/"wanted side" broadcast). Nobody is
+    /// addressed: the signed kind-9100 envelope is pushed to tag-similar
+    /// contacts, each of whom folds their own hop rating and decides
+    /// whether to relay it. `preferred` is an optional emphasis — leave it
+    /// empty and the whole declared profile routes it. `hours` +
+    /// `period` ("week" / "month") state availability. `sync_now` carries
+    /// the hops out.
+    pub fn originate_broadcast(
+        &mut self,
+        preferred: &[String],
+        note: &str,
+        hours: Option<u32>,
+        period: Option<&str>,
+        ttl_days: u64,
+    ) -> Result<BroadcastView, ClientError> {
+        let bkind = BroadcastKind::Demand;
+        let mut tags: Vec<String> = Vec::new();
+        for raw in preferred {
+            if raw.trim().is_empty() {
+                continue;
+            }
+            let tag = crate::taxonomy::resolve(raw)
+                .map_err(|reason| {
+                    ClientError::Profile(profile::ProfileError::Tag {
+                        input: raw.clone(),
+                        reason,
+                    })
+                })?
+                .tag()
+                .to_string();
+            if !tags.contains(&tag) {
+                tags.push(tag);
+            }
+        }
+        // No emphasis given: route on the whole declared profile.
+        if tags.is_empty() {
+            if let Some(p) = profile::current(self.history.events(), &self.pubkey_hex()) {
+                tags = p.skill_tags;
+            }
+        }
+        if tags.is_empty() {
+            return Err(ClientError::Config(
+                "publish at least one skill on your profile first — a post needs a tag to route on"
+                    .into(),
+            ));
+        }
+        let note = note.trim();
+        if note.chars().count() > 600 {
+            return Err(ClientError::Config("note is at most 600 characters".into()));
+        }
+        let period = match period.map(str::trim).filter(|s| !s.is_empty()) {
+            None => None,
+            Some("week") => Some("week"),
+            Some("month") => Some("month"),
+            Some(other) => {
+                return Err(ClientError::Config(format!(
+                    "availability period must be `week` or `month`, got {other:?}"
+                )))
+            }
+        };
+        let hours = hours.filter(|h| *h > 0 && *h <= 24 * 31);
+
+        let now = unix_now();
+        let ttl_days = ttl_days.clamp(1, 90);
+        let expires_at = now + ttl_days * 86_400;
+        let body = serde_json::json!({
+            "skill_tags": tags,
+            "note": note,
+            "hours": hours,
+            "period": period,
+        });
+
+        self.refresh_node();
+        let outcome = self
+            .node
+            .originate_broadcast(bkind, body, &tags, expires_at, now);
+
+        if let Some(held) = &outcome.held {
+            self.history.append(std::slice::from_ref(held))?;
+        }
+        for d in &outcome.deliveries {
+            let carry = BroadcastCarry {
+                envelope: d.envelope.clone(),
+                ratings: d.ratings.clone(),
+                path: d.path.clone(),
+            };
+            self.sync
+                .queue(broadcast_carry(&self.pubkey_hex(), &d.to, &carry).sign(&self.identity));
+        }
+        let snapshot = self.sync_state();
+        self.history.persist_sync_state(&snapshot)?;
+
+        let held = outcome
+            .held
+            .ok_or_else(|| ClientError::Config("broadcast produced no envelope".into()))?;
+        BroadcastView::from_event(&held, &self.pubkey_hex())
+            .ok_or_else(|| ClientError::Config("broadcast envelope did not parse".into()))
+    }
+
+    /// Every broadcast this identity holds — the ones it originated and
+    /// the ones that reached it over the trust graph — newest first,
+    /// expired ones dropped (NIP-QW14 §5.3).
+    pub fn broadcasts(&self) -> Vec<BroadcastView> {
+        let me = self.pubkey_hex();
+        let now = unix_now();
+        let mut out: Vec<BroadcastView> = self
+            .history
+            .events()
+            .iter()
+            .filter(|e| e.kind == KIND_BROADCAST)
+            .filter_map(|e| BroadcastView::from_event(e, &me))
+            .filter(|b| b.expires_at > now)
+            .collect();
+        out.sort_by(|a, b| b.created_at.cmp(&a.created_at).then(b.id.cmp(&a.id)));
+        out.dedup_by(|a, b| a.id == b.id);
+        out
+    }
+
     /// This identity's hop-1 contacts (everyone it has exchanged an
     /// introduction with), with the skill tags routing knows them by and
     /// this viewer's own trust read on each (§5 — always per-viewer, from
@@ -975,6 +1144,8 @@ impl Session {
                 ContactView {
                     npub: invite::npub_encode(&c.pubkey).unwrap_or_else(|_| c.pubkey.clone()),
                     pubkey: c.pubkey.clone(),
+                    display_name: profile::current_view(events, &c.pubkey)
+                        .and_then(|p| p.display_name),
                     declared_skill_tags: c.cached_skill_tags.clone(),
                     earned_skill_tags: c.earned_skill_tags.clone(),
                     trust_hops: path.as_ref().map(|p| p.hops),
@@ -1057,15 +1228,51 @@ impl Session {
 
     /// The most recent profile this identity published, or an empty one.
     pub fn profile_view(&self) -> ProfileView {
-        profile::current_view(self.history.events(), &self.pubkey_hex()).unwrap_or_else(|| {
-            ProfileView {
+        let mut v = profile::current_view(self.history.events(), &self.pubkey_hex())
+            .unwrap_or_else(|| ProfileView {
                 display_name: None,
+                name: None,
+                alt_name: None,
+                headline: None,
+                bio: None,
+                location: None,
+                employment: vec![],
+                education: vec![],
+                certifications: vec![],
                 tags: vec![],
                 levels: Default::default(),
                 sources: Default::default(),
                 links: vec![],
+            });
+        // The signed event carries only the `Public` prose and entries;
+        // the editor needs the full local state — every value/entry plus
+        // the visibility the holder chose for it.
+        let pl = &self.profile_local;
+        // Name: the local value if the holder has one, else a pre-existing
+        // published `display_name` (first load after upgrade — it persists
+        // on the next save). Keep the plain `display_name` in step for a
+        // legacy reader.
+        let name = if pl.name.value.trim().is_empty() {
+            match v.display_name.as_deref().filter(|s| !s.is_empty()) {
+                Some(n) => FieldView {
+                    value: n.to_string(),
+                    visibility: "public".to_string(),
+                },
+                None => FieldView::from(&pl.name),
             }
-        })
+        } else {
+            FieldView::from(&pl.name)
+        };
+        v.display_name = Some(name.value.clone()).filter(|s| !s.is_empty());
+        v.name = Some(name);
+        v.alt_name = Some(FieldView::from(&pl.alt_name));
+        v.headline = Some(FieldView::from(&pl.headline));
+        v.bio = Some(FieldView::from(&pl.bio));
+        v.location = Some(FieldView::from(&pl.location));
+        v.employment = pl.employment.clone();
+        v.education = pl.education.clone();
+        v.certifications = pl.certifications.clone();
+        v
     }
 
     /// The profile this viewer holds for some *other* pubkey — a contact's,
@@ -1079,9 +1286,63 @@ impl Session {
     /// Resolve, sign and queue a new replaceable profile event, its
     /// `revision` one past the last this identity published. `sync_now`
     /// publishes it.
-    pub fn set_profile(&mut self, edit: ProfileEdit) -> Result<String, ClientError> {
+    ///
+    /// A `headline` / `bio` / `location` or an `employment` / `education` /
+    /// `certifications` list in the edit updates the locally-held
+    /// [`ProfileLocal`] (values + each field's or entry's chosen
+    /// visibility), which is persisted; only what is marked `Public` is
+    /// then mirrored into the signed event. An edit that omits a field or
+    /// list leaves the stored one as it was.
+    pub fn set_profile(&mut self, mut edit: ProfileEdit) -> Result<String, ClientError> {
+        if let Some(n) = &edit.display_name {
+            self.profile_local.name = n.into();
+        }
+        if let Some(f) = &edit.alt_name {
+            self.profile_local.alt_name = f.into();
+        }
+        if let Some(f) = &edit.headline {
+            self.profile_local.headline = f.into();
+        }
+        if let Some(f) = &edit.bio {
+            self.profile_local.bio = f.into();
+        }
+        if let Some(f) = &edit.location {
+            self.profile_local.location = f.into();
+        }
+        if let Some(v) = edit.employment.take() {
+            self.profile_local.employment = v;
+        }
+        if let Some(v) = edit.education.take() {
+            self.profile_local.education = v;
+        }
+        if let Some(v) = edit.certifications.take() {
+            self.profile_local.certifications = v;
+        }
+
+        // Feed build_signed the merged local state, not whatever the caller
+        // happened to send — so a client that never learned these fields
+        // does not blank them out of the published profile.
+        let pl = &self.profile_local;
+        edit.display_name = Some(NameEdit::Field(ProfileFieldEdit::from(&pl.name)));
+        edit.alt_name = Some(ProfileFieldEdit::from(&pl.alt_name));
+        edit.headline = Some(ProfileFieldEdit::from(&pl.headline));
+        edit.bio = Some(ProfileFieldEdit::from(&pl.bio));
+        edit.location = Some(ProfileFieldEdit::from(&pl.location));
+        edit.employment = Some(pl.employment.clone());
+        edit.education = Some(pl.education.clone());
+        edit.certifications = Some(pl.certifications.clone());
+
         let event = profile::build_signed(&self.identity, self.history.events(), &edit)?;
-        self.author(event)
+        let id = self.author(event)?;
+        let snapshot = self.sync_state();
+        self.history.persist_sync_state(&snapshot)?;
+        Ok(id)
+    }
+
+    /// The locally-held profile prose (headline, bio) and the visibility
+    /// chosen for each. What the profile editor renders.
+    pub fn profile_local(&self) -> ProfileLocal {
+        self.profile_local.clone()
     }
 
     /// Every negotiation this identity is a party to, newest activity
@@ -1213,6 +1474,64 @@ pub struct SyncView {
     pub errors: Vec<String>,
 }
 
+/// One "open to work" post this identity holds — see [`Session::broadcasts`].
+#[derive(Debug, Clone, Serialize)]
+pub struct BroadcastView {
+    pub id: String,
+    pub originator_pubkey: String,
+    pub originator_npub: String,
+    /// True when this identity originated it.
+    pub mine: bool,
+    /// Skills the poster is emphasising (their whole profile if they gave
+    /// no preference).
+    pub skill_tags: Vec<String>,
+    pub note: String,
+    /// Availability: `hours` per `period` ("week" / "month"), if stated.
+    pub hours: Option<u32>,
+    pub period: Option<String>,
+    pub created_at: u64,
+    pub expires_at: u64,
+}
+
+impl BroadcastView {
+    fn from_event(e: &Event, me: &str) -> Option<Self> {
+        if e.kind != KIND_BROADCAST {
+            return None;
+        }
+        let env: Broadcast = serde_json::from_str(&e.content).ok()?;
+        let body = env.body;
+        let skill_tags = body
+            .get("skill_tags")
+            .and_then(|v| v.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|x| x.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let note = body
+            .get("note")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        Some(BroadcastView {
+            id: e.id.clone(),
+            originator_pubkey: e.pubkey.clone(),
+            originator_npub: invite::npub_encode(&e.pubkey).unwrap_or_else(|_| e.pubkey.clone()),
+            mine: e.pubkey == me,
+            skill_tags,
+            note,
+            hours: body.get("hours").and_then(|v| v.as_u64()).map(|h| h as u32),
+            period: body
+                .get("period")
+                .and_then(|v| v.as_str())
+                .map(str::to_string),
+            created_at: e.created_at,
+            expires_at: env.expires_at,
+        })
+    }
+}
+
 /// What [`Session::find_by_skill`] kicked off.
 #[derive(Debug, Clone, Serialize)]
 pub struct ReferralView {
@@ -1265,6 +1584,8 @@ impl From<FinalAnswer> for FinalAnswerView {
 pub struct ContactView {
     pub pubkey: String,
     pub npub: String,
+    /// Their published name, if this client holds a kind-10020 for them.
+    pub display_name: Option<String>,
     /// From their published profile, as this client currently holds it.
     pub declared_skill_tags: Vec<String>,
     /// From contracts they completed and a counterparty countersigned —
@@ -1369,7 +1690,7 @@ mod tests {
     /// links, the shape most tests want.
     fn pe(name: Option<&str>, tags: &[&str]) -> ProfileEdit {
         ProfileEdit {
-            display_name: name.map(str::to_string),
+            display_name: name.map(|n| NameEdit::Plain(n.to_string())),
             skills: tags
                 .iter()
                 .map(|t| crate::profile::SkillEdit {
@@ -1379,6 +1700,7 @@ mod tests {
                 })
                 .collect(),
             links: vec![],
+            ..Default::default()
         }
     }
 
@@ -1436,12 +1758,181 @@ mod tests {
     }
 
     #[test]
+    fn headline_and_bio_persist_locally_with_their_visibility() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = session_at(dir.path());
+
+        let mut e = pe(Some("vk"), &["Rust Lang"]);
+        e.headline = Some(crate::profile::ProfileFieldEdit {
+            value: "Backend engineer".into(),
+            visibility: "public".into(),
+        });
+        e.bio = Some(crate::profile::ProfileFieldEdit {
+            value: "notes for me".into(),
+            visibility: "private".into(),
+        });
+        s.set_profile(e).unwrap();
+
+        // The editor sees every field plus the visibility chosen for it.
+        let v = s.profile_view();
+        assert_eq!(v.headline.as_ref().unwrap().value, "Backend engineer");
+        assert_eq!(v.headline.as_ref().unwrap().visibility, "public");
+        assert_eq!(v.bio.as_ref().unwrap().value, "notes for me");
+        assert_eq!(v.bio.as_ref().unwrap().visibility, "private");
+
+        // The Public one is in the signed profile; the Private one is not.
+        let published: qw_protocol::events::ProfileSkillTags =
+            serde_json::from_str(&s.outbox().last().unwrap().content).unwrap();
+        assert_eq!(published.headline.as_deref(), Some("Backend engineer"));
+        assert_eq!(published.bio, None);
+
+        // Re-open the same store: the local prose is restored.
+        let s2 = session_at(dir.path());
+        assert_eq!(s2.profile_local().bio.value, "notes for me");
+        assert_eq!(s2.profile_view().headline.unwrap().value, "Backend engineer");
+    }
+
+    #[test]
+    fn display_name_visibility_and_alt_name() {
+        use crate::profile::ProfileFieldEdit;
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = session_at(dir.path());
+
+        // Real name kept private, an alias published.
+        let mut e = pe(None, &["Rust Lang"]);
+        e.display_name = Some(crate::profile::NameEdit::Field(ProfileFieldEdit {
+            value: "Vladimir K".into(),
+            visibility: "private".into(),
+        }));
+        e.alt_name = Some(ProfileFieldEdit {
+            value: "vk".into(),
+            visibility: "public".into(),
+        });
+        s.set_profile(e).unwrap();
+
+        // The editor sees both, with their visibilities.
+        let v = s.profile_view();
+        assert_eq!(v.name.as_ref().unwrap().value, "Vladimir K");
+        assert_eq!(v.name.as_ref().unwrap().visibility, "private");
+        assert_eq!(v.alt_name.as_ref().unwrap().value, "vk");
+        assert_eq!(v.alt_name.as_ref().unwrap().visibility, "public");
+
+        // The signed event carries the alias, not the private real name.
+        let published: qw_protocol::events::ProfileSkillTags =
+            serde_json::from_str(&s.outbox().last().unwrap().content).unwrap();
+        assert_eq!(published.display_name, None);
+        assert_eq!(published.alt_name.as_deref(), Some("vk"));
+
+        // A legacy bare-string display_name still means "public".
+        let mut e2 = pe(Some("Public Name"), &["Rust Lang"]);
+        e2.alt_name = None;
+        s.set_profile(e2).unwrap();
+        let published: qw_protocol::events::ProfileSkillTags =
+            serde_json::from_str(&s.outbox().last().unwrap().content).unwrap();
+        assert_eq!(published.display_name.as_deref(), Some("Public Name"));
+    }
+
+    #[test]
+    fn employment_entries_publish_per_entry_visibility() {
+        use crate::profile::{LocalEmployment, ProfileFieldEdit};
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = session_at(dir.path());
+
+        let mut e = pe(Some("vk"), &["Rust Lang"]);
+        e.location = Some(ProfileFieldEdit {
+            value: "Berlin, DE".into(),
+            visibility: "public".into(),
+        });
+        e.employment = Some(vec![
+            LocalEmployment {
+                entry: qw_protocol::events::Employment {
+                    title: "Staff Engineer".into(),
+                    org: "Acme".into(),
+                    start: "2021".into(),
+                    ..Default::default()
+                },
+                visibility: crate::profile::FieldVisibility::Public,
+            },
+            LocalEmployment {
+                entry: qw_protocol::events::Employment {
+                    title: "Contractor".into(),
+                    org: "Confidential".into(),
+                    ..Default::default()
+                },
+                visibility: crate::profile::FieldVisibility::Private,
+            },
+        ]);
+        s.set_profile(e).unwrap();
+
+        // The editor still sees both entries, each with its visibility.
+        let v = s.profile_view();
+        assert_eq!(v.employment.len(), 2);
+        assert_eq!(v.location.unwrap().value, "Berlin, DE");
+
+        // The signed profile carries only the Public one.
+        let published: qw_protocol::events::ProfileSkillTags =
+            serde_json::from_str(&s.outbox().last().unwrap().content).unwrap();
+        assert_eq!(published.employment.len(), 1);
+        assert_eq!(published.employment[0].title, "Staff Engineer");
+        assert_eq!(published.location.as_deref(), Some("Berlin, DE"));
+
+        // Survives a reopen.
+        let s2 = session_at(dir.path());
+        assert_eq!(s2.profile_local().employment.len(), 2);
+        assert_eq!(
+            s2.profile_local().employment[1].entry.org,
+            "Confidential"
+        );
+    }
+
+    #[test]
+    fn open_to_work_post_signs_an_envelope_lists_it_and_survives_reopen() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = session_at(dir.path());
+        s.set_profile(pe(Some("vk"), &["Rust Lang", "React"])).unwrap();
+
+        // An emphasis subset + availability.
+        let v = s
+            .originate_broadcast(
+                &["it/backend/languages#rust".into(), "rust".into()],
+                "looking for a backend project",
+                Some(20),
+                Some("week"),
+                14,
+            )
+            .unwrap();
+        assert!(v.mine);
+        assert_eq!(v.skill_tags, vec!["it/backend/languages#rust"]); // deduped + resolved
+        assert_eq!(v.hours, Some(20));
+        assert_eq!(v.period.as_deref(), Some("week"));
+        assert!(v.expires_at > v.created_at);
+
+        // No emphasis given -> routes on the whole published profile.
+        let v2 = s.originate_broadcast(&[], "open to anything", None, None, 7).unwrap();
+        assert_eq!(v2.skill_tags.len(), 2);
+        assert_eq!(v2.hours, None);
+
+        assert_eq!(s.broadcasts().len(), 2);
+        assert!(s.broadcasts().iter().any(|b| b.note == "looking for a backend project"));
+
+        // a bad period is rejected
+        assert!(matches!(
+            s.originate_broadcast(&["rust".into()], "", None, Some("fortnight"), 7),
+            Err(ClientError::Config(_))
+        ));
+
+        // held envelopes are in the ledger, so a reopened session still lists them
+        let s2 = session_at(dir.path());
+        assert_eq!(s2.broadcasts().len(), 2);
+    }
+
+    #[test]
     fn a_profile_carries_levels_links_and_a_grouped_evidence_class() {
         let dir = tempfile::tempdir().unwrap();
         let mut s = session_at(dir.path());
 
         s.set_profile(ProfileEdit {
-            display_name: Some("vk".into()),
+            display_name: Some(NameEdit::Plain("vk".into())),
             skills: vec![
                 crate::profile::SkillEdit {
                     tag: "Rust Lang".into(),
@@ -1458,6 +1949,7 @@ mod tests {
                 network: "GitHub".into(),
                 url: "https://github.com/vk".into(),
             }],
+            ..Default::default()
         })
         .unwrap();
 
@@ -1719,6 +2211,7 @@ mod tests {
             admission: Default::default(),
             propagation: Default::default(),
             client_prefs: Default::default(),
+            profile_local: Default::default(),
         });
         assert!(s.outbox().is_empty(), "an id with no matching event is skipped");
     }

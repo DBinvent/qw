@@ -7,7 +7,7 @@ export function Footer() {
     <footer className="relative border-t border-border">
       <div className="mx-auto max-w-5xl px-4 py-12 sm:px-6">
         {/*
-          Generated from ../../../../user_mgmt/web — the same signup box the
+          Generated from ../../../../user_mgmt/web - the same signup box the
           dash sites use, posting to /api/news/subscribe, which src/worker.ts
           forwards to qw-server. Double opt-in: nothing is sent to the address
           until the confirmation link is clicked.
@@ -43,7 +43,7 @@ export function Footer() {
         </div>
         <p className="mt-6 text-center text-xs leading-relaxed text-muted-foreground sm:text-left">
           Early prototype. Deletion is advisory only, and the co-authorship tax framing has not been confirmed by a
-          written tax opinion — see the repository README before publishing anything or referencing this project
+          written tax opinion - see the repository README before publishing anything or referencing this project
           externally.
         </p>
       </div>

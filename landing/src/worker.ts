@@ -4,27 +4,27 @@ export interface Env {
   ASSETS: Fetcher;
   BACKEND_ORIGIN: string;
   /** Optional. Unauthenticated GitHub is 60 req/h per IP; a token lifts it
-   *  to 5,000. Absent is fine — the edge cache absorbs most of it. */
+   *  to 5,000. Absent is fine - the edge cache absorbs most of it. */
   GITHUB_TOKEN?: string;
 }
 
 // Four routes, everything else is static assets.
 //
-// 1. /api/* — the newsletter signup in the footer POSTs to
+// 1. /api/* - the newsletter signup in the footer POSTs to
 //    /api/news/subscribe, forwarded to qw-server at home, which owns the
 //    subscribers table in Postgres. The browser only ever talks to this
 //    origin, so the forward is same-origin from the page's point of view and
 //    needs no CORS. An absolute fetch to BACKEND_ORIGIN from the page would
 //    defeat that; don't add one.
 //
-// 2. /i/<npub> — public invite links (NIP-QW07). A static export cannot have
+// 2. /i/<npub> - public invite links (NIP-QW07). A static export cannot have
 //    a route per npub, so one exported page (/invite/) is served for all of
 //    them, with its title and OG tags rewritten per key. That rewrite is the
 //    whole reason this is a Worker route and not a redirect: these links are
 //    posted on LinkedIn, and the preview card is most of what a reader sees
 //    before deciding to click.
 //
-// 3. /gh/<handle> — the same invite, short enough for a profile bio. 76
+// 3. /gh/<handle> - the same invite, short enough for a profile bio. 76
 //    characters of npub URL does not fit where the link is most useful, and
 //    a bio is exactly where it belongs. This borrows GitHub's namespace
 //    rather than creating one: GitHub already decides who owns a handle, so
@@ -36,17 +36,17 @@ export interface Env {
 //    URL carries the key, so it survives this site disappearing and anyone
 //    can re-host it, where /gh/vk carries nothing but a promise.
 //
-// 4. /download/android — the current APK, without this site knowing which
+// 4. /download/android - the current APK, without this site knowing which
 //    one that is. Reads the release manifest and redirects to the exact
 //    versioned file, so publishing a build needs no deploy here.
 //
 //    Why not link `-latest.apk` directly: it is served
 //    `max-age=300, must-revalidate` so it can track releases, which is right
-//    for a pointer and ruinous for 18 MB of payload — every download would
+//    for a pointer and ruinous for 18 MB of payload - every download would
 //    revalidate at the edge. The redirect is the short-lived thing; what it
 //    points at is the versioned name, cached immutably for a year.
 
-// Shape check only — bech32 charset and length, or a bare 32-byte hex key.
+// Shape check only - bech32 charset and length, or a bare 32-byte hex key.
 // The authority is qw_protocol::invite::parse_invite_target; this is the
 // same rule expressed where a Worker can run it. Deliberately not a full
 // bech32 checksum verify: an npub that passes here but fails there gets the
@@ -55,7 +55,7 @@ export interface Env {
 const NPUB = /^npub1[023456789acdefghjklmnpqrstuvwxyz]{58}$/;
 const HEX = /^[0-9a-fA-F]{64}$/;
 
-// The same shape, unanchored — for finding a key inside prose. A GitHub bio
+// The same shape, unanchored - for finding a key inside prose. A GitHub bio
 // may hold the bare npub or a full knownby.work/i/<npub> URL; both are the
 // same needle.
 const NPUB_IN_TEXT = /npub1[023456789acdefghjklmnpqrstuvwxyz]{58}/;
@@ -63,7 +63,7 @@ const NPUB_IN_TEXT = /npub1[023456789acdefghjklmnpqrstuvwxyz]{58}/;
 // The release host, and the two names on it this Worker needs. Kept here
 // rather than imported from lib/links.ts: that module is bundled into the
 // page, this one runs on the edge, and they are deployed as separate
-// artifacts — a shared import would only look like it kept them in sync.
+// artifacts - a shared import would only look like it kept them in sync.
 const RELEASE_BASE = "https://app.knownby.work";
 const ANDROID_MANIFEST = `${RELEASE_BASE}/qw-android-arm64.json`;
 const ANDROID_FALLBACK = `${RELEASE_BASE}/qw-android-arm64-latest.apk`;
@@ -193,7 +193,7 @@ async function resolveGitHub(handle: string, env: Env): Promise<Resolution> {
     return { kind: "unavailable" };
   }
 
-  // Bio first, then the profile's website field — a person who set their
+  // Bio first, then the profile's website field - a person who set their
   // site to their invite link has already published the key.
   const haystack = [user.bio, user.blog, user.name].filter(Boolean).join(" ");
   const hit = haystack.match(NPUB_IN_TEXT);
@@ -205,12 +205,12 @@ function shortLinkPage(status: number, heading: string, body: string): Response 
   return new Response(
     `<!doctype html><meta charset="utf-8">` +
       `<meta name="viewport" content="width=device-width,initial-scale=1">` +
-      `<title>${heading} — QW</title>` +
+      `<title>${heading} - QW</title>` +
       `<style>body{margin:0;min-height:100vh;display:grid;place-items:center;` +
-      `background:#09090b;color:#e4e4e7;font:15px/1.65 ui-sans-serif,system-ui,sans-serif;padding:2rem}` +
+      `background:#04100a;color:#c9f5d6;font:15px/1.65 ui-sans-serif,system-ui,sans-serif;padding:2rem}` +
       `main{max-width:32rem}h1{font-size:1.15rem;margin:0 0 .75rem}` +
-      `p{color:#a1a1aa;margin:0 0 1rem}code{font-family:ui-monospace,monospace;font-size:.85em;color:#e4e4e7}` +
-      `a{color:#a78bfa}</style>` +
+      `p{color:#6fae86;margin:0 0 1rem}code{font-family:ui-monospace,monospace;font-size:.85em;color:#c9f5d6}` +
+      `a{color:#00ff66}</style>` +
       `<main><h1>${heading}</h1>${body}` +
       `<p><a href="/join">How QW works</a></p></main>`,
     {
@@ -266,7 +266,7 @@ export default {
           503,
           "Could not reach GitHub",
           `<p>This link resolves by reading <code>github.com/${escapeAttr(handle)}</code>, and that ` +
-            `lookup failed just now — usually a rate limit. It is not a statement about whether ` +
+            `lookup failed just now - usually a rate limit. It is not a statement about whether ` +
             `that account is on QW. Try again in a minute.</p>`,
         );
       }
@@ -275,7 +275,7 @@ export default {
         "No QW key on that profile",
         `<p><code>github.com/${escapeAttr(handle)}</code> does not publish a QW key, or the handle ` +
           `does not exist. This link works by reading the npub out of a GitHub bio or website ` +
-          `field, so nothing here is a registration — the owner of the handle is the only one ` +
+          `field, so nothing here is a registration - the owner of the handle is the only one ` +
           `who can make it resolve.</p>` +
           `<p>If that is you: put your <code>npub1…</code>, or your full ` +
           `<code>knownby.work/i/npub1…</code> link, in your GitHub bio.</p>`,
@@ -285,7 +285,7 @@ export default {
     const invite = inviteTarget(url.pathname);
     if (invite) {
       // Fetch the exported page by its own path, not by rewriting the
-      // request URL — the assets binding looks it up directly, and the
+      // request URL - the assets binding looks it up directly, and the
       // browser's location stays /i/<npub> so the page can read the key.
       // No trailing slash: the export writes out/invite.html and serves it
       // at /invite, while /invite/ 307-redirects there.
@@ -294,7 +294,7 @@ export default {
 
       const short = `${invite.slice(0, 12)}…${invite.slice(-6)}`;
       const title = "You've been invited to connect on QW";
-      const description = `${short} shared a QW invite link. Following it makes you a direct contact — skills confirmed by the people you worked with and for.`;
+      const description = `${short} shared a QW invite link. Following it makes you a direct contact - skills confirmed by the people you worked with and for.`;
 
       return new HTMLRewriter()
         .on("title", new TitleRewriter(title))

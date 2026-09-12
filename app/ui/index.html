@@ -10,17 +10,99 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>QW</title>
 <style>
-  :root { color-scheme: dark; }
+  /* Colour scheme: a phosphor terminal, not the generic violet-on-zinc
+     every dev tool defaults to (matches the knownby.work landing page's
+     2026-09-11 palette - one accent, green, on a near-black ground tinted
+     toward it rather than neutral grey; danger stays red, the one hue the
+     palette does not touch). Dark is the default (:root); a light palette
+     overrides the tokens either when the OS asks for light and the viewer
+     has not forced dark, or when they picked Light in the Filter tab -
+     it keeps the same green identity on a white ground, since "light"
+     still has to be readable. `data-theme` on <html> is set by the
+     inline script below from localStorage['qw.theme'] before first
+     paint. */
+  :root {
+    color-scheme: dark;
+    --bg: #04100a; --surface: #081a10; --surface-2: #0e2417;
+    --border: #123321; --ghost-bg: #123321;
+    --text: #c9f5d6; --muted: #6fae86; --dim: #4f9169; --dim-2: #2f5c42;
+    --accent: #00ff66; --accent-2: #8dffc0; --accent-border: #145c33;
+    --primary: #00ff66; --primary-active: #00cc52; --on-primary: #021a0c;
+    /* Filled buttons: dim centre, bright border (see the button rule). */
+    --primary-fill: #0b3a20; --primary-fill-active: #12522c; --primary-text: #baffd6;
+    /* Idle/disabled button border: neutral grey, not the green-tinted
+       --border, so "not actionable right now" reads as a different
+       thing from "a section edge". */
+    --btn-idle-border: #7e8a85;
+    --info: #7ee0ff; --info-border: #123a4a;
+    --level: #d8f5e0; --level-border: #1f4a30;
+    --danger: #ff3b5c; --danger-text: #ffc9d3; --danger-bg: #1a0508;
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      color-scheme: light;
+      --bg: #ffffff; --surface: #f3fbf6; --surface-2: #e8f7ee;
+      --border: #cdeedd; --ghost-bg: #cdeedd;
+      --text: #06210f; --muted: #3f7a58; --dim: #5c9974; --dim-2: #8fc7a8;
+      --accent: #0a8a3f; --accent-2: #067a35; --accent-border: #b9e8cc;
+      --primary: #0a8a3f; --primary-active: #076b30; --on-primary: #ffffff;
+    --primary-fill: #e6f8ed; --primary-fill-active: #d2f0e0; --primary-text: #06451f;
+    --btn-idle-border: #b3bdb8;
+      --info: #0369a1; --info-border: #bae6fd;
+      --level: #234a35; --level-border: #cdeedd;
+      --danger: #dc2626; --danger-text: #7f1d1d; --danger-bg: #fef2f2;
+    }
+  }
+  :root[data-theme="light"] {
+    color-scheme: light;
+    --bg: #ffffff; --surface: #f3fbf6; --surface-2: #e8f7ee;
+    --border: #cdeedd; --ghost-bg: #cdeedd;
+    --text: #06210f; --muted: #3f7a58; --dim: #5c9974; --dim-2: #8fc7a8;
+    --accent: #0a8a3f; --accent-2: #067a35; --accent-border: #b9e8cc;
+    --primary: #0a8a3f; --primary-active: #076b30; --on-primary: #ffffff;
+    --primary-fill: #e6f8ed; --primary-fill-active: #d2f0e0; --primary-text: #06451f;
+    --btn-idle-border: #b3bdb8;
+    --info: #0369a1; --info-border: #bae6fd;
+    --level: #234a35; --level-border: #cdeedd;
+    --danger: #dc2626; --danger-text: #7f1d1d; --danger-bg: #fef2f2;
+  }
+  :root[data-theme="dark"] { color-scheme: dark; }
   html { -webkit-text-size-adjust: 100%; }
-  body { margin: 0; background: #09090b; color: #e4e4e7;
+  body { margin: 0; background: var(--bg); color: var(--text);
          font: 15px/1.6 ui-sans-serif, system-ui, sans-serif;
          padding: calc(1.25rem + env(safe-area-inset-top)) calc(1.25rem + env(safe-area-inset-right))
                   calc(1.25rem + env(safe-area-inset-bottom)) calc(1.25rem + env(safe-area-inset-left)); }
+  /* A very faint CRT scan behind everything - texture, not a gimmick.
+     Negative z-index on a fixed pseudo-element is what keeps it pinned
+     behind the page without a wrapper div; it scales with the accent
+     colour so it stays proportionate in both themes instead of being a
+     dark-mode-only hack. */
+  body::before {
+    content: ''; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+    background-image: repeating-linear-gradient(to bottom,
+      color-mix(in oklch, var(--accent) 5%, transparent) 0,
+      color-mix(in oklch, var(--accent) 5%, transparent) 1px,
+      transparent 1px, transparent 3px);
+  }
   main { max-width: 34rem; margin: 0 auto; }
   h1 { font-size: 1.1rem; letter-spacing: .12em; text-transform: uppercase;
-       color: #a78bfa; margin: 0 0 1.25rem; }
-  section { border: 1px solid #27272a; border-radius: .6rem; padding: 1rem 1.25rem;
-            margin-bottom: 1rem; background: #111114; }
+       color: var(--accent); margin: 0 0 1.25rem; }
+  h1 a { color: inherit; text-decoration: none; display: inline-flex;
+         align-items: center; gap: .5rem; }
+  h1 a:hover .wordmark { text-decoration: underline; }
+  /* The mark from qw/landing (components/qw/logo.tsx, app/icon.svg): five
+     nodes and their edges as an hourglass - a web of trust in miniature,
+     and the shape of what QW measures. Same geometry as there, so the two
+     front doors carry one logo; inline rather than a file because this page
+     is a single self-contained document. currentColor, so it follows the
+     accent through both themes. */
+  h1 .mark { flex: 0 0 auto; width: 1.55rem; height: 1.55rem;
+             display: inline-flex; align-items: center; justify-content: center;
+             border: 1px solid var(--border); border-radius: .3rem;
+             background: var(--surface); }
+  h1 .mark svg { width: 1.05rem; height: 1.05rem; display: block; }
+  section { border: 1px solid var(--border); border-radius: .35rem; padding: 1rem 1.25rem;
+            margin-bottom: 1rem; background: var(--surface); }
   code { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px;
          /* An npub has no spaces, so it would otherwise push the card wider
             than the screen and set the whole app scrolling sideways. */
@@ -29,95 +111,147 @@
           /* 16px exactly: anything smaller makes iOS Safari zoom in on focus
              and never zoom back out. */
           font-size: 16px;
-          width: 100%; box-sizing: border-box; padding: .7rem; background: #09090b;
-          color: inherit; border: 1px solid #27272a; border-radius: .4rem; }
-  button { margin-top: .75rem; min-height: 44px; padding: .6rem 1.2rem; border: 0;
-           border-radius: .4rem; background: #7c3aed; color: white; font: inherit;
-           font-size: 15px; cursor: pointer; touch-action: manipulation; }
-  button:active { background: #6d28d9; }
-  .muted { color: #a1a1aa; }
+          width: 100%; box-sizing: border-box; padding: .7rem; background: var(--bg);
+          color: inherit; border: 1px solid var(--border); border-radius: .3rem; }
+  /* A checkbox is not a text field - the rule above would blow it up to
+     full width with a .7rem pad and float it off its label. */
+  input[type="checkbox"], input[type="radio"] {
+          width: auto; min-height: 0; margin: 0; padding: 0; flex: 0 0 auto;
+          accent-color: var(--primary); }
+  /* checkbox/radio + its wrapping <label>: box on the left, text beside. */
+  label.check { display: flex; align-items: flex-start; gap: .5rem; margin: .5rem 0; }
+  /* Dim centre, bold bright border - not a slab of the accent. At button
+     size #00ff66 glares against this ground and pulls the eye off the page's
+     actual content, while the same colour in a 2px border still reads as the
+     accent. Ink goes pale mint: --on-primary is near-black, which would
+     vanish on the dim fill. Padding drops by the 2px the border now takes
+     (box-sizing: border-box), so the buttons stay the size they were. */
+  button { margin-top: .75rem; min-height: 44px; padding: .5rem 1.15rem;
+           border: 2px solid var(--primary); border-radius: .3rem;
+           background: var(--primary-fill); color: var(--primary-text); font: inherit;
+           font-size: 15px; font-weight: 600; cursor: pointer; touch-action: manipulation; }
+  button:active:not(:disabled) { background: var(--primary-fill-active); }
+  /* Disabled: the accent border is a promise the button cannot keep right
+     now, so it goes grey and the ink dims. The JS disables these (the
+     sign-in pair while a passphrase is stretching, the countersign party
+     select), and until now a disabled button looked exactly like a live
+     one. Grey border keeps the 2px, so nothing moves when it re-enables. */
+  button:disabled { border-color: var(--btn-idle-border); color: var(--muted);
+                    background: var(--surface-2); cursor: default; }
+  .muted { color: var(--muted); }
+  /* Page and section intros: a short, bold lead line first (what this is),
+     a smaller explanation under it (how it works) - instead of one long
+     paragraph a reader has to get through before finding the point. */
+  .lead { font-weight: 600; color: var(--text); margin: 0 0 .3rem; font-size: 14px; }
+  .lead + .muted { font-size: 12.5px; line-height: 1.5; }
   /* One row per skill, badges on the right. Two evidence axes that are
      independent of each other, so they are two chips rather than one
-     combined rank — there is no exchange rate between "someone reviewed
+     combined rank - there is no exchange rate between "someone reviewed
      your GitHub" and "someone paid you and signed for it". */
   .skills { list-style: none; margin: .25rem 0 0; padding: 0; }
   .skills li { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem;
-               padding: .55rem 0; border-top: 1px solid #27272a; }
+               padding: .55rem 0; border-top: 1px solid var(--border); }
   .skills li:first-child { border-top: 0; }
-  /* Skills are grouped by sector/domain (NIP-QW03) into collapsible
-     panels — one <details> per group, wrapped in an <li>. Panels start
-     open only when the whole set is small (see renderGrouped); past that
-     they collapse, so a long profile stays scannable by field. */
+  /* Skills roll up by NIP-QW03 sector into collapsible panels - one
+     <details> per sector ("IT", "DESIGN", …), wrapped in an <li>, with a
+     small sub-header per domain inside it. Panels start open only when the
+     whole set is small (see renderGrouped); past that they collapse, so a
+     long profile stays scannable by field. */
   .skills li.skill-group { display: block; padding: 0;
-               border-top: 1px solid #27272a; }
+               border-top: 1px solid var(--border); }
   .skills li.skill-group:first-child { border-top: 0; }
+  /* domain sub-header inside a sector panel (e.g. "backend" under IT) */
+  .skills li.group-head { display: block; border-top: 0;
+               padding: .5rem 0 .1rem; font-size: 10px; letter-spacing: .06em;
+               text-transform: uppercase; color: var(--dim-2); }
   .skills li.skill-group > details > summary {
                list-style: none; cursor: pointer; display: flex;
                align-items: center; gap: .5rem; padding: .7rem 0 .5rem;
                font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
-               color: #71717a; }
+               color: var(--dim); }
   .skills li.skill-group > details > summary::-webkit-details-marker { display: none; }
   .skills li.skill-group > details > summary::before {
-               content: "\25B8"; color: #52525b; font-size: 10px; }
+               content: "\25B8"; color: var(--dim-2); font-size: 10px; }
   .skills li.skill-group > details[open] > summary::before { content: "\25BE"; }
   .skills li.skill-group .group-count {
                margin-left: auto; text-transform: none; letter-spacing: 0;
-               font-size: 10px; color: #a1a1aa; border: 1px solid #27272a;
+               font-size: 10px; color: var(--muted); border: 1px solid var(--border);
                border-radius: 999px; padding: .1rem .45rem; }
   .skills li.skill-group > details > ul.skills { margin: 0; padding-bottom: .35rem; }
   .skill-tag { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 13px;
                overflow-wrap: anywhere; margin-right: auto; }
   .badge { font-size: 11px; line-height: 1; padding: .32rem .5rem; border-radius: 999px;
-           border: 1px solid #27272a; color: #a1a1aa; white-space: nowrap; }
+           border: 1px solid var(--border); color: var(--muted); white-space: nowrap; }
   /* The countersigned one is the only badge that costs someone else a
      signature, so it is the only one that gets the accent. */
-  .badge.contract { border-color: #4c1d95; color: #c4b5fd; }
-  /* Evidence class per skill (NIP-QW03 §5): a job-approved tag reuses the
+  .badge.contract { border-color: var(--accent-border); color: var(--accent-2); }
+  /* Evidence class per skill (NIP-QW03 5): a job-approved tag reuses the
      accent, a commit-analysis one gets its own blue, an unproven one stays
      muted. Self-assessed level is a neutral pill. */
-  .badge.algo { border-color: #1e3a5f; color: #93c5fd; }
-  .badge.level { border-color: #3f3f46; color: #d4d4d8; }
+  .badge.algo { border-color: var(--info-border); color: var(--info); }
+  .badge.level { border-color: var(--level-border); color: var(--level); }
   /* External-network links: one row each, network label then URL. */
   .links { list-style: none; margin: .25rem 0 0; padding: 0; }
   .links li { display: flex; flex-wrap: wrap; align-items: baseline; gap: .5rem;
-              padding: .5rem 0; border-top: 1px solid #27272a; }
+              padding: .5rem 0; border-top: 1px solid var(--border); }
   .links li:first-child { border-top: 0; }
   .links .net { font-size: 11px; text-transform: uppercase; letter-spacing: .05em;
-                color: #a1a1aa; min-width: 5rem; }
-  .links a { color: #a78bfa; overflow-wrap: anywhere; }
+                color: var(--muted); min-width: 5rem; }
+  .links a { color: var(--accent); overflow-wrap: anywhere; }
   .chip select { margin: 0; min-height: 0; padding: .1rem .2rem; font: inherit;
-                 font-size: 11px; background: #09090b; color: #c4b5fd;
-                 border: 1px solid #4c1d95; border-radius: .3rem; }
+                 font-size: 11px; background: var(--bg); color: var(--accent-2);
+                 border: 1px solid var(--accent-border); border-radius: .3rem; }
   /* Profile editor: the published tags as removable chips. Max five, per
      the taxonomy's own rule. */
   .chips { display: flex; flex-wrap: wrap; gap: .4rem; margin: .5rem 0 0; padding: 0; list-style: none; }
   .chip { display: inline-flex; align-items: center; gap: .4rem; font-family: ui-monospace, monospace;
-          font-size: 12px; padding: .35rem .5rem; border: 1px solid #4c1d95; border-radius: 999px;
-          color: #c4b5fd; overflow-wrap: anywhere; }
-  .chip button { margin: 0; min-height: 0; padding: 0 .3rem; background: none; color: #a1a1aa;
-                 font-size: 15px; line-height: 1; border-radius: .3rem; }
-  .chip button:active { background: #27272a; }
-  .row { display: flex; gap: .5rem; }
-  .row input { flex: 1; }
+          font-size: 12px; padding: .35rem .5rem; border: 1px solid var(--accent-border); border-radius: 999px;
+          color: var(--accent-2); overflow-wrap: anywhere; }
+  .chip button { margin: 0; min-height: 0; padding: 0 .3rem; background: none; color: var(--muted);
+                 font-size: 15px; line-height: 1; border: 0; border-radius: .3rem; }
+  .chip button:active { background: var(--border); }
+  /* Wrap rather than crush: on a narrow phone a row of select + prefix +
+     input + button has to be allowed to break onto a second line. The
+     min-width:0 is what lets a flex input shrink at all - its default
+     min-width:auto plus the width:100% above keep it from ever yielding. */
+  .row { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
+  .row input, .row select { flex: 1 1 12rem; min-width: 0; }
   .row button { margin-top: 0; flex: 0 0 auto; }
+  /* A text field paired with a small visibility picker (headline / bio). */
+  .field-vis { display: flex; flex-wrap: wrap; align-items: flex-start;
+               gap: .5rem; margin: .5rem 0; }
+  .field-vis > input, .field-vis > textarea { flex: 1 1 12rem; min-width: 0; }
+  select.vis { flex: 0 0 auto; width: auto; font: inherit; font-size: 13px;
+               padding: .55rem .4rem; background: var(--bg); color: inherit;
+               border: 1px solid var(--border); border-radius: .3rem; }
+  /* One employment / education / certification entry: fields stacked, a
+     footer with its own visibility picker and a remove button. */
+  .entry { border: 1px solid var(--border); border-radius: .3rem; padding: .6rem;
+           margin: .5rem 0; }
+  .entry input, .entry textarea { margin: .3rem 0; }
+  .entry-foot { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem;
+                margin-top: .35rem; }
+  .entry-foot button { margin: 0; min-height: 0; padding: .35rem .7rem;
+                       font-size: 12px; background: none; color: var(--muted);
+                       border: 1px solid var(--border); }
   /* The QR sits on its own white plate whatever the theme is doing: a
      camera needs light modules to be light, and this page is near-black.
      Capped so it never grows past a comfortable phone-screen square, and
      centred because the person scanning it is looking at the screen from
      the other side of a table. */
   .qr { display: block; margin: 0 auto; width: 100%; max-width: 15rem;
-        background: #fff; border-radius: .5rem; padding: .6rem; box-sizing: border-box; }
+        background: #fff; border-radius: .3rem; padding: .6rem; box-sizing: border-box; }
   .qr svg { display: block; width: 100%; height: auto; }
   /* Contract proposals. A counter is a full replacement of the terms, so
-     the compose box is the same one for both — it just changes its label
+     the compose box is the same one for both - it just changes its label
      and locks the counterparty when answering an existing thread. */
   textarea { font: inherit; font-size: 16px; width: 100%; box-sizing: border-box;
-             min-height: 4.5rem; padding: .7rem; background: #09090b; color: inherit;
-             border: 1px solid #27272a; border-radius: .4rem; resize: vertical; }
-  details > summary { cursor: pointer; color: #a78bfa; margin: .5rem 0; }
-  button.ghost { background: #27272a; color: #e4e4e7; }
+             min-height: 4.5rem; padding: .7rem; background: var(--bg); color: inherit;
+             border: 1px solid var(--border); border-radius: .3rem; resize: vertical; }
+  details > summary { cursor: pointer; color: var(--accent); margin: .5rem 0; }
+  button.ghost { background: var(--border); color: var(--text); }
   .negs { list-style: none; margin: .25rem 0 0; padding: 0; }
-  .negs li { padding: .7rem 0; border-top: 1px solid #27272a; }
+  .negs li { padding: .7rem 0; border-top: 1px solid var(--border); }
   .negs li:first-child { border-top: 0; }
   .neg-line { display: flex; flex-wrap: wrap; gap: .4rem; align-items: baseline; }
   .neg-party { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px;
@@ -129,7 +263,7 @@
      master; any one signs in. The primary passphrase has no Remove. */
   .keys { list-style: none; margin: .25rem 0 .75rem; padding: 0; }
   .keys li { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem;
-             padding: .55rem 0; border-top: 1px solid #27272a; }
+             padding: .55rem 0; border-top: 1px solid var(--border); }
   .keys li:first-child { border-top: 0; }
   .keys .k-tag { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 13px;
                  margin-right: auto; overflow-wrap: anywhere; }
@@ -139,24 +273,28 @@
      selectable so it can be copied by hand. */
   #recovery-code, #seed-value {
     font-family: ui-monospace, SFMono-Regular, monospace; font-size: 15px;
-    letter-spacing: .04em; background: #09090b; border: 1px solid #7c3aed;
-    border-radius: .4rem; padding: .8rem; margin: .5rem 0 0;
+    letter-spacing: .04em; background: var(--bg); border: 1px solid var(--primary);
+    border-radius: .3rem; padding: .8rem; margin: .5rem 0 0;
     overflow-wrap: anywhere; user-select: all; -webkit-user-select: all; }
   /* Shown on every web deployment, signed in or not: this build keeps the
      signing key in server memory, which the Tauri app never does. Rose
      border so it reads as a caution, not a section. */
-  .disclaimer { border: 1px solid #fb7185; border-radius: .6rem;
+  .disclaimer { border: 1px solid var(--danger); border-radius: .35rem;
     padding: .8rem 1rem; margin: 0 0 1rem; font-size: 13px; line-height: 1.55;
-    color: #fecdd3; background: #1a0f13; }
-  .disclaimer strong { color: #fb7185; }
+    color: var(--danger-text); background: var(--danger-bg); }
+  .disclaimer strong { color: var(--danger); }
   .disclaimer a { color: inherit; }
   /* Top navigation. The one page this file used to be is now six, shown one
      at a time; the rest carry [hidden]. */
   #topnav { display: flex; flex-wrap: wrap; gap: .4rem; margin: 0 0 1.25rem;
-            border-bottom: 1px solid #27272a; padding-bottom: .6rem; }
+            border-bottom: 1px solid var(--border); padding-bottom: .6rem; }
+  /* Border stays 2px on every tab so activating one does not shift the row:
+     grey while idle, accent once active. */
   #topnav button { margin: 0; min-height: 0; padding: .45rem .8rem; font-size: 13px;
-                   background: #18181b; color: #a1a1aa; }
-  #topnav button.active { background: #7c3aed; color: #fff; }
+                   font-weight: 400; background: var(--surface-2); color: var(--muted);
+                   border-color: var(--btn-idle-border); }
+  #topnav button.active { background: var(--primary-fill); color: var(--primary-text);
+                          border-color: var(--primary); font-weight: 600; }
   .page[hidden] { display: none; }
   /* The invite QR is clickable: small inline, full-screen on tap. */
   .qr { cursor: zoom-in; }
@@ -166,72 +304,89 @@
   #qr-modal[hidden] { display: none; }
   #qr-modal .qr { width: auto; max-width: min(88vw, 88vh); cursor: zoom-out; }
   #copy svg { vertical-align: -2px; margin-right: .4rem; }
-  /* Per-row detail an expander reveals — a raw npub has no spaces, so it
+  /* Per-row detail an expander reveals - a raw npub has no spaces, so it
      needs its own line and a hard break. */
   .row-detail { margin-top: .4rem; flex-basis: 100%; word-break: break-all; }
   /* Register / sign-in explainer: the passphrase is the key, and there is
      no email anywhere in the flow. */
-  #auth-note { border: 1px solid #27272a; border-radius: .5rem; padding: .7rem .9rem;
-               margin: .85rem 0; font-size: 12.5px; line-height: 1.5; color: #a1a1aa; }
-  #auth-note strong { color: #c4b5fd; }
+  #auth-note { border: 1px solid var(--border); border-radius: .3rem; padding: .7rem .9rem;
+               margin: .85rem 0; font-size: 12.5px; line-height: 1.5; color: var(--muted); }
+  #auth-note strong { color: var(--accent-2); }
   #auth-note p { margin: .45rem 0; }
   #auth-note p:first-child { margin-top: 0; }
   #auth-note p:last-child { margin-bottom: 0; }
   .prop-table { border-collapse: collapse; font-size: 12px; margin: .6rem 0; }
   .prop-table th, .prop-table td { padding: .25rem .4rem; text-align: left; }
-  .prop-table thead th { color: #a1a1aa; font-weight: 600; text-transform: capitalize; }
-  .prop-table tbody th { color: #a1a1aa; font-weight: 500; white-space: nowrap; }
+  .prop-table thead th { color: var(--muted); font-weight: 600; text-transform: capitalize; }
+  .prop-table tbody th { color: var(--muted); font-weight: 500; white-space: nowrap; }
   .prop-table input { width: 4.2rem; padding: .2rem .3rem; font-size: 12px;
-                      background: #09090b; border: 1px solid #27272a; border-radius: .3rem;
-                      color: #fafafa; }
+                      background: var(--bg); border: 1px solid var(--border); border-radius: .3rem;
+                      color: var(--text); }
   .prop-table label { display: inline-flex; flex-direction: column; gap: .2rem;
-                      margin: .3rem .6rem .3rem 0; font-size: 11px; color: #a1a1aa; }
-  details.cfg { border: 1px solid #27272a; border-radius: .5rem; margin: .5rem 0; }
+                      margin: .3rem .6rem .3rem 0; font-size: 11px; color: var(--muted); }
+  details.cfg { border: 1px solid var(--border); border-radius: .3rem; margin: .5rem 0; }
   details.cfg > summary { cursor: pointer; padding: .6rem .8rem; font-weight: 600;
                           list-style-position: inside; }
-  details.cfg[open] > summary { border-bottom: 1px solid #27272a; }
+  details.cfg[open] > summary { border-bottom: 1px solid var(--border); }
   details.cfg > section { padding: .3rem .8rem .7rem; }
   #bureau-list .row { align-items: center; margin: .3rem 0; }
 </style>
+<script>
+  // Apply the saved colour scheme before first paint, so there is no
+  // flash. "system" (or nothing stored) leaves it to prefers-color-scheme.
+  try {
+    var _t = localStorage.getItem('qw.theme');
+    if (_t === 'light' || _t === 'dark') document.documentElement.dataset.theme = _t;
+  } catch (e) { /* private mode / storage blocked */ }
+</script>
 </head>
 <body>
   <main>
-  <h1>QW</h1>
+  <h1><a href="https://knownby.work" target="_blank" rel="noopener"
+    ><span class="mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"
+        ><circle cx="5.5" cy="3.5" r="1.7" fill="currentColor"/><circle cx="18.5" cy="3.5" r="1.7" fill="currentColor"
+        /><circle cx="12" cy="12" r="1.7" fill="currentColor"/><circle cx="5.5" cy="20.5" r="1.7" fill="currentColor"
+        /><circle cx="18.5" cy="20.5" r="1.7" fill="currentColor"
+        /><path d="M5.5 3.5h13M5.5 3.5 12 12l6.5-8.5M12 12l-6.5 8.5M12 12l6.5 8.5M5.5 20.5h13"
+          stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg
+    ></span><span class="wordmark">QW</span></a></h1>
 
   <!-- Shown by boot() on a web build only while the sign-in / register form
        is up: the hosted version generates and holds your key in server
        memory for the session, and that is a call to make before you
        register. Hidden once you are signed in. -->
   <div id="web-disclaimer" class="disclaimer" hidden>
-    <strong>Hosted preview.</strong> This browser build keeps your signing
-    key in the server's memory while you are signed in — it is not on your
-    device, and whoever runs this host can reach it. Fine for trying QW.
-    Before anything you need to keep, open the <em>Keys</em> panel, copy your
-    identity seed, and move to the app, where the key never leaves your
-    hardware.
+    <strong>Hosted preview.</strong> The key here is the master key for your
+    account: it signs your records <em>and</em> encrypts everything you store,
+    so your account sits encrypted at rest and is only decrypted into this
+    server's memory while you are signed in. No other user can read it - but
+    whoever operates this host could technically extract it during an
+    unlocked session. Fine for trying QW. Before anything you need to keep,
+    open the <em>Keys</em> panel, copy your identity seed, and move to the
+    app, where the key never leaves your hardware.
   </div>
 
   <!-- Only ever shown on a multi-user qw-web host, and only when not signed
        in: the very first backend call comes back 401. The Tauri shell and a
        single-user server never 401, so this stays hidden there. The
        passphrase is sent over TLS and unlocks the account's key in server
-       memory for this session only — see server/multi-user.md. -->
+       memory for this session only - see server/multi-user.md. -->
   <section id="auth" hidden>
     <div class="muted">Sign in to this host, or pick a nickname to register.</div>
     <div id="auth-note">
       <p><strong>Your passphrase is the key.</strong> It is stretched with
         Argon2id and used to unwrap the master key that signs your records
         and decrypts your account on this server. It is sent once over TLS
-        to unlock the session and is never stored — pick something long,
+        to unlock the session and is never stored - pick something long,
         and reuse it nowhere.</p>
       <p><strong>Email is not a way back in.</strong> Registering takes a
         nickname and a passphrase. If an address is added it is stored
         encrypted at rest, the same as the nickname, and is only ever a
-        verify / notify channel — never a passphrase reset. Forget the
+        verify / notify channel - never a passphrase reset. Forget the
         passphrase and the one-time <em>recovery code</em> shown right after
         you register is the only way back; without it the account is gone.</p>
     </div>
-    <p><input id="auth-nick" placeholder="Nickname — at least 8 characters"
+    <p><input id="auth-nick" placeholder="Nickname - at least 8 characters"
        autocomplete="username" autocapitalize="none" spellcheck="false"></p>
     <p><input id="auth-secret" type="password" placeholder="Passphrase"
        autocomplete="current-password"></p>
@@ -245,11 +400,16 @@
 
   <div id="app" hidden>
 
+  <!-- Labels here are what's shown; `data-page` (unchanged, so PAGES /
+       showPage / localStorage keys are untouched) is what routes. "Jobs"
+       reads nothing like "Contacts" the way "Contracts" did; "Find" reads
+       nothing like "Identity" the way "Discover" did. -->
   <nav id="topnav">
     <button type="button" data-page="identity" class="active">Identity</button>
     <button type="button" data-page="profile">Profile</button>
-    <button type="button" data-page="contracts">Contracts</button>
+    <button type="button" data-page="contracts">Jobs</button>
     <button type="button" data-page="contacts">Contacts</button>
+    <button type="button" data-page="discover">Find</button>
     <button type="button" data-page="filter">Filter</button>
     <button type="button" data-page="mail">Mail</button>
     <button type="button" data-page="security" id="nav-security" hidden>Security</button>
@@ -258,8 +418,9 @@
   <!-- ===================== IDENTITY ===================== -->
   <div class="page" data-page="identity">
   <section>
-    <div class="muted">Your invite link — post it anywhere your work history already lives,
-      or let someone scan it. Tap the code to enlarge it.</div>
+    <p class="lead">Your invite link</p>
+    <p class="muted">Post it anywhere your work history already lives, or let
+      someone scan it. Tap the code to enlarge it.</p>
     <!-- Filled from the identity command; the SVG is built in Rust
          (qw_client_core::invite_qr_svg) because this page has no bundler
          and so no QR library. Empty until then rather than a placeholder
@@ -278,20 +439,8 @@
     <p class="muted" id="copy-status"></p>
   </section>
 
-  <section>
-    <div class="muted">Your skills, grouped by field. Each row carries its
-      evidence: <span class="badge">○ unproven</span> (self-declared),
-      <span class="badge algo">⚙ algorithmic</span> (suggested from your commit
-      history) or <span class="badge contract">✓ approved by job</span> (a
-      counterparty countersigned it). A self-assessed level shows as
-      <span class="badge level">▲ senior</span>.</div>
-    <ul class="skills" id="skills"></ul>
-    <p class="muted" id="skills-empty">Nothing yet. Publish a skill, or complete
-      a contract and it appears here on its own.</p>
-  </section>
-
   <section id="links-section" hidden>
-    <div class="muted">Other networks where this profile can be checked — until
+    <div class="muted">Other networks where this profile can be checked - until
       a job approves the skill for you.</div>
     <ul class="links" id="ext-links"></ul>
   </section>
@@ -300,30 +449,91 @@
   <!-- ===================== PROFILE ===================== -->
   <div class="page" data-page="profile" hidden>
   <section>
-    <div class="muted">Your skills, grouped by field, and the
-      <strong>score</strong> each has earned — the mean rating counterparties
-      gave the countersigned work behind that tag (0–5), over how many
-      contracts. Countersigned work is the only axis that carries a number
-      (NIP-QW03 §5): a bare claim, a level or a commit-history hint adds reach,
-      not a score. Every row shows its evidence class
+    <p class="lead">Your skills, with the score each has earned</p>
+    <p class="muted">The mean rating counterparties gave the countersigned
+      work behind that tag (0-5), over how many contracts. Countersigned
+      work is the only axis that carries a number (NIP-QW03 5): a bare
+      claim, a level or a commit-history hint adds reach, not a score.
+      Every row shows its evidence class
       (<span class="badge">○ unproven</span> /
       <span class="badge algo">⚙ algorithmic</span> /
-      <span class="badge contract">✓ approved by job</span>).</div>
+      <span class="badge contract">✓ approved by job</span>).</p>
     <ul class="skills" id="profile-scores"></ul>
-    <p class="muted" id="profile-scores-empty">No skills yet — add one below,
+    <p class="muted" id="profile-scores-empty">No skills yet - add one below,
       publish it, then complete a contract to put a score on it.</p>
   </section>
 
   <section>
     <div class="muted">Publish the tags a referral query should match you on.
-      They are <strong>public</strong> — that is how relays route a question
+      They are <strong>public</strong> - that is how relays route a question
       to you, and one you do not publish is simply unreachable. Set a level on
-      each if you want (beginner / intermediate / senior / expert) — it is
+      each if you want (beginner / intermediate / senior / expert) - it is
       self-assessed and does not affect routing.</div>
-    <p><input id="profile-name" placeholder="Display name (optional)"
-              autocapitalize="words" spellcheck="false" maxlength="80"></p>
+    <div class="field-vis">
+      <input id="profile-name" placeholder="Display name (optional)"
+             autocapitalize="words" spellcheck="false" maxlength="79">
+      <select id="profile-name-vis" class="vis" aria-label="Display name visibility">
+        <option value="public">Public</option>
+        <option value="contacts">Contacts - local for now</option>
+        <option value="private">Private</option>
+      </select>
+    </div>
+    <div class="field-vis">
+      <input id="profile-alt-name" maxlength="79" autocapitalize="words"
+             spellcheck="false" placeholder="Alternate public name - an alias">
+      <select id="profile-alt-name-vis" class="vis" aria-label="Alternate name visibility">
+        <option value="public">Public</option>
+        <option value="contacts">Contacts - local for now</option>
+        <option value="private">Private</option>
+      </select>
+    </div>
+    <div class="field-vis">
+      <input id="profile-headline" maxlength="119" spellcheck="false"
+             placeholder="Headline - one line, e.g. Backend engineer · Rust/axum">
+      <select id="profile-headline-vis" class="vis" aria-label="Headline visibility">
+        <option value="public">Public</option>
+        <option value="contacts">Contacts - local for now</option>
+        <option value="private">Private</option>
+      </select>
+    </div>
+    <div class="field-vis">
+      <textarea id="profile-bio" maxlength="599" rows="3"
+                placeholder="Short bio (optional)"></textarea>
+      <select id="profile-bio-vis" class="vis" aria-label="Bio visibility">
+        <option value="public">Public</option>
+        <option value="contacts">Contacts - local for now</option>
+        <option value="private">Private</option>
+      </select>
+    </div>
+    <div class="field-vis">
+      <input id="profile-location" maxlength="79" spellcheck="false"
+             placeholder="Location - e.g. Berlin, DE">
+      <select id="profile-location-vis" class="vis" aria-label="Location visibility">
+        <option value="public">Public</option>
+        <option value="contacts">Contacts - local for now</option>
+        <option value="private">Private</option>
+      </select>
+    </div>
+    <p class="muted" style="font-size:11px"><strong>Public</strong> is published in
+      your profile · <strong>Private</strong> never leaves this device ·
+      <strong>Contacts</strong> is planned - stored locally for now. Set it per
+      field, and per entry below.</p>
+
+    <details class="cfg"><summary>Work history</summary>
+      <div id="emp-list"></div>
+      <button id="emp-add" type="button">Add a job</button>
+    </details>
+    <details class="cfg"><summary>Education</summary>
+      <div id="edu-list"></div>
+      <button id="edu-add" type="button">Add education</button>
+    </details>
+    <details class="cfg"><summary>Certifications</summary>
+      <div id="cert-list"></div>
+      <button id="cert-add" type="button">Add a certification</button>
+    </details>
+
     <div class="row">
-      <input id="profile-tag" list="taxonomy" placeholder="Add a skill — pick or type"
+      <input id="profile-tag" list="taxonomy" placeholder="Add a skill - pick or type"
              autocapitalize="none" autocorrect="off" spellcheck="false">
       <button id="profile-add" type="button">Add</button>
     </div>
@@ -331,7 +541,7 @@
     <ul class="chips" id="profile-chips"></ul>
     <button id="profile-save">Save &amp; publish</button>
     <p class="muted" id="profile-status"></p>
-    <p class="muted">Remove every tag and Save is refused — an empty profile is
+    <p class="muted">Remove every tag and Save is refused - an empty profile is
       not a profile, it is being unroutable. Remove tags one at a time above,
       or publish a replacement.</p>
   </section>
@@ -339,7 +549,7 @@
   <section>
     <div class="muted"><strong>Ask a bureau to review your skills</strong>
       (NIP-QW15). A bureau checks the tags you have published against your
-      countersigned QW work record and signs what it can stand behind —
+      countersigned QW work record and signs what it can stand behind - 
       <em>corroboration, not certification</em>. Nothing is published; you
       decide what to keep.</div>
     <div class="row">
@@ -348,25 +558,26 @@
              autocapitalize="none" autocorrect="off" spellcheck="false">
       <button id="rec-go" type="button">Request recognition</button>
     </div>
-    <label class="muted" style="display:block;margin:.4rem 0">
-      <input type="checkbox" id="rec-append"> also let the bureau parse the
-      public profiles it has verified I control
+    <label class="muted check">
+      <input type="checkbox" id="rec-append">
+      <span>also let the bureau parse the public profiles it has verified I
+      control</span>
     </label>
     <p class="muted" id="rec-status"></p>
     <div id="rec-result"></div>
   </section>
 
   <section>
-    <div class="muted">Links to other networks — GitHub, LinkedIn, a personal
+    <div class="muted">Links to other networks - GitHub, LinkedIn, a personal
       site. Self-asserted, <strong>not evidence</strong>: somewhere a viewer
       can corroborate a claim by hand until a countersigned contract does it
       for them. Pick a network and type just your handle; or paste a link
-      and it recognises the network for you — anything it can't place stays
+      and it recognises the network for you - anything it can't place stays
       <em>custom</em>.</div>
     <div class="row">
       <select id="link-network" aria-label="Network"></select>
       <span id="link-prefix" class="net" style="white-space:nowrap"></span>
-      <input id="link-handle" placeholder="username" style="flex:1"
+      <input id="link-handle" placeholder="username"
              autocapitalize="none" autocorrect="off" spellcheck="false">
       <button id="link-add" type="button">Add</button>
     </div>
@@ -378,17 +589,19 @@
   <!-- ===================== CONTRACTS ===================== -->
   <div class="page" data-page="contracts" hidden>
   <section>
-    <div class="muted">Contracts. An invite usually exists <strong>because</strong>
-      of an upcoming one — follow a link on Contacts, then propose it here. Each
-      round is a full set of terms: a counter <strong>replaces</strong> them,
-      it does not edit them. Only the worker's signed Accept ends the
-      exchange; walking away is just silence.</div>
+    <p class="lead">Contracts</p>
+    <p class="muted">An invite usually exists <strong>because</strong> of an
+      upcoming one - follow a link on <strong>Find</strong>, then propose it
+      here. Each round is a full set of terms: a counter
+      <strong>replaces</strong> them, it does not edit them. Only the
+      worker's signed Accept ends the exchange; walking away is just
+      silence.</p>
     <ul class="negs" id="negs"></ul>
     <p class="muted" id="negs-empty">No proposals yet.</p>
     <p class="muted" id="negs-hidden-note" hidden>
       <label><input type="checkbox" id="contracts-show-hidden">
         show <span id="contracts-hidden-count">0</span> hidden</label>
-      — hiding is local to this client; a signed contract cannot be deleted
+ - hiding is local to this client; a signed contract cannot be deleted
     </p>
     <details id="propose-box">
       <summary id="propose-summary">New proposal</summary>
@@ -396,7 +609,7 @@
                 autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text"></p>
       <p class="muted" id="neg-intro-hint" hidden></p>
       <div class="row">
-        <input id="neg-skill" list="taxonomy" placeholder="Skill — pick or type"
+        <input id="neg-skill" list="taxonomy" placeholder="Skill - pick or type"
                autocapitalize="none" autocorrect="off" spellcheck="false">
         <button id="neg-skill-add" type="button">Add</button>
       </div>
@@ -407,7 +620,7 @@
         <button id="neg-rate-avg" type="button" class="ghost">avg</button>
       </div>
       <!-- abstract.md: Quants = Hours × Rate × ko × km. ko/km are optional
-           subjective multipliers — leave blank to keep the price simple. -->
+           subjective multipliers - leave blank to keep the price simple. -->
       <div class="row">
         <input id="neg-ko" inputmode="decimal" placeholder="ko × (optional)">
         <input id="neg-km" inputmode="decimal" placeholder="km × (optional)">
@@ -419,12 +632,86 @@
       <p class="muted" id="neg-status"></p>
     </details>
   </section>
+
+  <section>
+    <p class="lead">Open to work <span class="muted">(NIP-QW14)</span></p>
+    <p class="muted">Tell the network you are looking for a new project. Not
+      addressed to anyone: it is pushed to contacts whose skills overlap
+      yours, each of whom decides whether to pass it on, and it expires on
+      its own. Your published profile skills carry it - add a few below
+      only to <em>emphasise</em> some of them. Tune reach in the Filter
+      tab.</p>
+    <div class="row">
+      <input id="bc-skill" list="taxonomy" placeholder="Preferred skill (optional)"
+             autocapitalize="none" autocorrect="off" spellcheck="false">
+      <button id="bc-skill-add" type="button">Add</button>
+    </div>
+    <ul class="chips" id="bc-chips"></ul>
+    <div class="row">
+      <input id="bc-hours" inputmode="numeric" placeholder="Hours available">
+      <select id="bc-period" aria-label="Availability period">
+        <option value="week">per week</option>
+        <option value="month">per month</option>
+      </select>
+    </div>
+    <p><textarea id="bc-note" maxlength="600" rows="2"
+                 placeholder="A line about what you are after (optional)"></textarea></p>
+    <div class="row">
+      <input id="bc-ttl" inputmode="numeric" placeholder="Days live - 7">
+      <button id="bc-send" type="button">Post</button>
+    </div>
+    <p class="muted" id="bc-status"></p>
+    <ul class="skills" id="bc-list"></ul>
+    <p class="muted" id="bc-empty">Nothing yet - yours, and any that reach you, show here.</p>
+  </section>
   </div>
 
   <!-- ===================== CONTACTS ===================== -->
   <div class="page" data-page="contacts" hidden>
   <section>
-    <div class="muted">Follow someone's link</div>
+    <p class="lead">Your network</p>
+    <p class="muted">Everyone you have exchanged an introduction with. Each
+      row: their name and the skills routing knows them by
+      (<span class="badge">countersigned</span> beats a plain claim), then
+      <strong>your own</strong> trust read - hops on the shortest verified
+      credit path (or <span class="badge">unknown</span> when none reaches
+      them, which is not the same as zero) and the running balance. There
+      is no global score; this is computed here, from records you hold.
+      Follow someone new on <strong>Find</strong>.</p>
+    <p class="muted" id="net-position"></p>
+    <div class="row">
+      <input id="contacts-search" placeholder="Search name, npub or skill"
+             autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="search">
+    </div>
+    <div class="row">
+      <select id="contacts-sort" aria-label="Sort contacts">
+        <option value="name">Sort: name</option>
+        <option value="trust">Sort: trust score</option>
+        <option value="hops">Sort: fewest hops</option>
+        <option value="skills">Sort: most skills</option>
+        <option value="balance">Sort: balance</option>
+      </select>
+      <select id="contacts-filter" aria-label="Filter contacts">
+        <option value="all">All</option>
+        <option value="trusted">Has a trust path</option>
+        <option value="unknown">Unknown-risk</option>
+        <option value="countersigned">Has a countersigned skill</option>
+        <option value="hidden">Hidden</option>
+      </select>
+    </div>
+    <ul class="skills" id="contacts"></ul>
+    <p class="muted" id="contacts-empty">No contacts yet - follow someone's
+      link on Find.</p>
+    <p class="muted" id="contacts-count"></p>
+  </section>
+  </div>
+
+  <!-- ===================== DISCOVER ===================== -->
+  <div class="page" data-page="discover" hidden>
+  <section>
+    <p class="lead">Follow someone</p>
+    <p class="muted">Paste <em>their</em> invite link (not yours, that's on
+      Identity) and they arrive as a first-degree contact.</p>
     <p><input id="follow-input" placeholder="https://knownby.work/i/npub1…" spellcheck="false"
               autocapitalize="none" autocorrect="off" inputmode="url"></p>
     <button id="follow">Follow</button>
@@ -432,32 +719,13 @@
   </section>
 
   <section>
-    <div class="muted">Your network — everyone you have exchanged an
-      introduction with. Badges: the skills routing knows them by
-      (<span class="badge">countersigned</span> beats a plain claim), then
-      <strong>your own</strong> trust read — hops on the shortest verified
-      credit path (or <span class="badge">unknown</span> when none reaches
-      them, which is not the same as zero) and the running balance with
-      them. There is no global score; this is computed here, from records
-      you hold.</div>
-    <p class="muted" id="net-position"></p>
-    <ul class="skills" id="contacts"></ul>
-    <p class="muted" id="contacts-empty">No contacts yet. Follow someone's
-      link above.</p>
-    <p class="muted" id="contacts-hidden-note" hidden>
-      <label><input type="checkbox" id="contacts-show-hidden">
-        show <span id="contacts-hidden-count">0</span> hidden</label>
-      — hiding is local to this client; the protocol has no unfollow
-    </p>
-  </section>
-
-  <section>
-    <div class="muted">Find someone by skill. The question walks your
-      contacts, then theirs — up to 3 hops — toward whoever has done that
-      kind of work. Your own contacts see you asked; <strong>Sync</strong> on
-      the Mail page to send it, and again to collect what comes back.</div>
+    <p class="lead">Search by skill</p>
+    <p class="muted">The question walks your contacts, then theirs - up to
+      3 hops - toward whoever has done that kind of work. Your own
+      contacts see you asked; <strong>Sync</strong> on the Mail page to
+      send it, and again to collect what comes back.</p>
     <div class="row">
-      <input id="find-skill" list="taxonomy" placeholder="Skill — pick or type"
+      <input id="find-skill" list="taxonomy" placeholder="Skill - pick or type"
              autocapitalize="none" autocorrect="off" spellcheck="false">
       <button id="find-go" type="button">Search</button>
     </div>
@@ -468,31 +736,45 @@
 
   <!-- ===================== FILTER ===================== -->
   <div class="page" data-page="filter" hidden>
-  <p class="muted">Every knob this client has. Each group opens for the full
-    explanation. Some are wired; some are shown as <span class="badge">not
-    implemented</span> so the surface matches what the mobile app will
-    carry.</p>
+  <p class="lead">Every knob this client has</p>
+  <p class="muted">Each group opens for the full explanation. Some are
+    wired; some are shown as <span class="badge">not implemented</span> so
+    the surface matches what the mobile app will carry.</p>
+
+  <details class="cfg" open><summary>Appearance</summary>
+  <section>
+    <div class="muted">Colour scheme for this device.
+      <strong>System</strong> follows your operating system.</div>
+    <div class="row">
+      <select id="theme" aria-label="Colour scheme">
+        <option value="system">System</option>
+        <option value="light">Light</option>
+        <option value="dark">Dark</option>
+      </select>
+    </div>
+  </section>
+  </details>
 
   <details class="cfg" open><summary>Inbound proposal filter</summary>
   <section>
     <div class="muted">Two local pre-filters run on every inbound proposal
       before you look at it (abstract.md, "Basic Use Cases"). A proposal
-      that fails one is <strong>flagged</strong> on the Contracts list — not
+      that fails one is <strong>flagged</strong> on the Jobs list - not
       hidden, and you can always admit it anyway. Both thresholds are
       private: a declined party is never told which one it failed, or that
       either is set. Leave a field blank to turn that check off.</div>
-    <p class="muted"><strong>Minimum reputation</strong> — your trust-path
+    <p class="muted"><strong>Minimum reputation</strong> - your trust-path
       score for the requester in this skill area: the Quant value on the
       closing edge of the shortest verified credit-issuance path from you to
       them, halved per hop. No such path is <em>unknown-risk</em>, below any
       threshold.</p>
-    <p><input id="filter-minrep" inputmode="decimal" placeholder="e.g. 5 — blank = off"></p>
-    <p class="muted"><strong>Position limit</strong> — a
+    <p><input id="filter-minrep" inputmode="decimal" placeholder="e.g. 5 - blank = off"></p>
+    <p class="muted"><strong>Position limit</strong> - a
       <strong>multiplier</strong> of the requester's verified completed work
       in the last 90 days. <code>1.0</code> lets a proposal push your
       balance with them up to one times their recent output; <code>0</code>
       none.</p>
-    <p><input id="filter-poslimit" inputmode="decimal" placeholder="e.g. 1.5 — blank = off"></p>
+    <p><input id="filter-poslimit" inputmode="decimal" placeholder="e.g. 1.5 - blank = off"></p>
     <button id="filter-save">Save filter</button>
     <p class="muted" id="filter-status"></p>
   </section>
@@ -511,7 +793,7 @@
     <div class="row">
       <input id="bureau-url" placeholder="https://bureau.example" inputmode="url"
              autocapitalize="none" autocorrect="off" spellcheck="false">
-      <input id="bureau-trust" inputmode="decimal" placeholder="trust — 0.8" style="width:5rem">
+      <input id="bureau-trust" inputmode="decimal" placeholder="trust - 0.8" style="width:5rem">
       <button id="bureau-add" type="button">Add</button>
     </div>
     <button id="bureau-save">Save bureaus</button>
@@ -523,13 +805,13 @@
   <section>
     <div class="muted">A <em>proposal</em> / <em>demand</em> /
       <em>profile</em> / <em>news</em> / <em>review</em> you push travels
-      hop to hop; each relaying node applies a per-type policy — how far it
+      hop to hop; each relaying node applies a per-type policy - how far it
       goes (<strong>hops</strong>), how old / large it may be
       (<strong>age</strong>, <strong>size</strong>), how wide each hop fans
       it out (<strong>fan-out</strong>), the minimum folded hop-score to
       keep relaying (<strong>score floor</strong>), how long this node's
       signed rating of an originator is reused (<strong>rating TTL</strong>),
-      and a per-contact daily cap (<strong>rate</strong>). Stock NIP-QW14 §4
+      and a per-contact daily cap (<strong>rate</strong>). Stock NIP-QW14 4
       defaults until changed.</div>
     <div style="overflow-x:auto"><table id="prop-table" class="prop-table"></table></div>
     <button id="prop-save">Save propagation</button>
@@ -541,20 +823,20 @@
     <span class="badge">not implemented</span> <span class="badge contract">NIP-QW13</span></summary>
   <section>
     <div class="muted">The configurable per-domain scoring model
-      (NIP-QW13 §1) — <code>tolerance</code>, rating / completion / quant
+      (NIP-QW13 1) - <code>tolerance</code>, rating / completion / quant
       weights, recency half-life, <code>side_settled_factor</code>
       (a contract with no credit issuance, NIP-QW01 kind 9006),
       <code>mf2_weight</code> (a direct contact's judgment of someone you
-      distrust nudges their score, §2b), scope inheritance and the path
-      knobs. <strong>Not built yet</strong> — <code>qw_protocol::trust</code>
+      distrust nudges their score, 2b), scope inheritance and the path
+      knobs. <strong>Not built yet</strong> - <code>qw_protocol::trust</code>
       still uses the single-path magnitude score. Shown so the surface is
       visible.</div>
     <div class="prop-table">
       <label>side_settled_factor <input value="0.6" disabled></label>
       <label>mf2_weight <input value="0.1" disabled></label>
-      <label>rating_weight <input value="—" disabled></label>
-      <label>quant_weight <input value="—" disabled></label>
-      <label>recency_halflife <input value="—" disabled></label>
+      <label>rating_weight <input value=" - " disabled></label>
+      <label>quant_weight <input value=" - " disabled></label>
+      <label>recency_halflife <input value=" - " disabled></label>
       <label>scope: parent_of <input value="0.5" disabled></label>
     </div>
   </section>
@@ -563,7 +845,7 @@
   <details class="cfg"><summary>Skill limits <span class="badge contract">NIP-QW03</span></summary>
   <section>
     <div class="muted">Enforced by the protocol on every profile: a skill
-      tag is <strong>1–79 characters</strong> and a profile carries
+      tag is <strong>1-79 characters</strong> and a profile carries
       <strong>fewer than 80</strong> of them. Fixed, not editable.</div>
     <div class="prop-table">
       <label>max tag length <input value="79" disabled></label>
@@ -576,17 +858,19 @@
   <!-- ===================== MAIL ===================== -->
   <div class="page" data-page="mail" hidden>
   <section>
-    <div class="muted">Mailbox. QW keeps no always-on connection.
-      <strong>Sync</strong> hands a coordination server what you have signed
-      and collects what it is holding for you; everything delivered is
-      verified on this device before it counts, and it never needs a login.</div>
+    <p class="lead">Mailbox</p>
+    <p class="muted">QW keeps no always-on connection.
+      <strong>Sync</strong> hands a coordination server what you have
+      signed and collects what it is holding for you; everything delivered
+      is verified on this device before it counts, and it never needs a
+      login.</p>
     <button id="sync">Sync now</button>
     <p class="muted" id="sync-status">Not synced yet.</p>
     <p class="muted" id="mail-tallies"></p>
   </section>
 
   <section>
-    <div class="muted">Relay / coordination servers — the mailboxes a Sync
+    <div class="muted">Relay / coordination servers - the mailboxes a Sync
       flushes to and polls from, tried top to bottom. They are untrusted
       infrastructure: one can withhold or delay your mail, but nothing it
       serves is taken without a signature check on this device. Add your own
@@ -597,7 +881,7 @@
     <p class="muted" id="servers-status"></p>
 
     <div class="muted">Or pull a web host's published default list and adopt
-      it — point at a <code>qw-web</code> you trust and take its
+      it - point at a <code>qw-web</code> you trust and take its
       <code>GET /servers</code> as your own.</div>
     <div class="row">
       <input id="servers-bootstrap-url" spellcheck="false" autocapitalize="none"
@@ -606,11 +890,6 @@
     </div>
   </section>
 
-  <section id="signout-section" hidden>
-    <div class="muted">Signed in to this host. Signing out clears the session
-      key from server memory; your records stay.</div>
-    <button id="signout" class="ghost" type="button">Sign out</button>
-  </section>
   </div>
 
   <!-- ===================== SECURITY ===================== -->
@@ -619,16 +898,17 @@
        the Tauri shell and a single-user server the key is a file on a box
        you already trust, so there is nothing to manage here. -->
   <section id="keys-section" hidden>
-    <div class="muted">Passphrases for this account. Any one of them signs you
-      in — they each wrap the same master key, which never changes. Add a
-      second passphrase for another device, and keep a
-      <strong>recovery code</strong> somewhere offline: forget every other
-      passphrase and it is the only way back. There is no email reset.</div>
+    <p class="lead">Passphrases for this account</p>
+    <p class="muted">Any one of them signs you in - they each wrap the same
+      master key, which never changes. Add a second passphrase for another
+      device, and keep a <strong>recovery code</strong> somewhere offline:
+      forget every other passphrase and it is the only way back. There is
+      no email reset.</p>
     <ul class="keys" id="keys"></ul>
     <div class="row">
-      <input id="kek-label" placeholder="Label — e.g. laptop" autocapitalize="none"
+      <input id="kek-label" placeholder="Label - e.g. laptop" autocapitalize="none"
              autocorrect="off" spellcheck="false" maxlength="40">
-      <input id="kek-secret" type="password" placeholder="New passphrase — 8+ chars"
+      <input id="kek-secret" type="password" placeholder="New passphrase - 8+ chars"
              autocomplete="new-password">
     </div>
     <div class="row">
@@ -639,7 +919,7 @@
     <p id="recovery-code" hidden></p>
     <details id="seed-details">
       <summary>Show identity key</summary>
-      <p class="muted">This 64-character key <strong>is</strong> the account —
+      <p class="muted">This 64-character key <strong>is</strong> the account - 
         anyone who has it is you, and there is no reset. Save it the way you
         would a password-manager export; paste it into another QW client to
         carry the identity across, even if this host disappears.</p>
@@ -647,15 +927,22 @@
       <p id="seed-value" hidden></p>
     </details>
   </section>
+
+  <section id="signout-section" hidden>
+    <div class="muted">Signed in to this host. Signing out clears the session
+      key from server memory; your records stay.</div>
+    <button id="signout" class="ghost" type="button">Sign out</button>
+  </section>
+
   <p class="muted" id="security-na" hidden>On this build the identity key is a
-    file on a device you already control — there is nothing to manage here.</p>
+    file on a device you already control - there is nothing to manage here.</p>
 
   <section id="about-section">
     <div class="muted">This host and the build it is running. Compare the build
       id against the latest commit to tell whether a deploy has landed.</div>
     <div id="security-disclaimer" class="disclaimer"></div>
-    <p class="muted">qw-web <code id="about-version">—</code>
-      &nbsp;·&nbsp; build <code id="about-build">—</code></p>
+    <p class="muted">qw-web <code id="about-version"> - </code>
+      &nbsp;·&nbsp; build <code id="about-build"> - </code></p>
   </section>
   </div>
 
@@ -668,14 +955,31 @@
   </div>
 
 <script type="module">
+// --- colour scheme (Light / Dark / System) -------------------------
+// The inline <head> script already applied a stored light/dark choice so
+// there is no flash; this only keeps the Filter-tab <select> in step and
+// persists a change. `data-theme` absent = follow the OS.
+{
+  const sel = document.getElementById('theme');
+  const apply = (v) => {
+    if (v === 'light' || v === 'dark') document.documentElement.dataset.theme = v;
+    else document.documentElement.removeAttribute('data-theme');
+  };
+  try { sel.value = localStorage.getItem('qw.theme') || 'system'; } catch { /* storage blocked */ }
+  sel.addEventListener('change', () => {
+    try { localStorage.setItem('qw.theme', sel.value); } catch { /* storage blocked */ }
+    apply(sel.value);
+  });
+}
+
 // One RPC seam, two backends. In the Tauri shell `window.__TAURI__` is
 // present and `invoke` is its IPC bridge. Served by `qw-web` it is absent,
 // so the same call goes over HTTP to `/api/<cmd>` with the identical
-// argument object as the body — a rejected command is a non-2xx response
+// argument object as the body - a rejected command is a non-2xx response
 // carrying `{error}`, thrown as the same bare string a Tauri rejection
 // gives. Everything below this line is unaware of which one it is.
 const isWeb = !(window.__TAURI__ && window.__TAURI__.core);
-// The HTTP status of the last `invoke` call — read by boot() to tell a
+// The HTTP status of the last `invoke` call - read by boot() to tell a
 // "not signed in" 401 (a multi-user host) from a real failure.
 let lastHttpStatus = 0;
 
@@ -703,13 +1007,15 @@ async function showIdentity() {
   me = await invoke('identity');
   document.getElementById('link').textContent = me.invite_link;
 
-  renderSkills(me.skills || []);
+  // Skills used to render here too - dropped: the Profile tab already
+  // shows every skill, grouped, with the score earned on top, so this was
+  // the same list twice.
   renderLinks(me.links || []);
 
   // innerHTML with app-built markup would normally be the wrong reflex.
   // Here the string is an SVG this app generated in its own process from
   // its own public key, never anything a peer sent, and the CSP is
-  // `default-src 'self'` — so there is no remote content and no script to
+  // `default-src 'self'` - so there is no remote content and no script to
   // inject. The alternative is parsing an SVG by hand for no gain.
   if (me.invite_qr) {
     const qr = document.getElementById('qr');
@@ -728,9 +1034,9 @@ async function showIdentity() {
 // navigator.clipboard needs a secure context, which the Android WebView's
 // custom asset protocol is not guaranteed to be. Fall back to the old
 // execCommand path, and if even that is refused say so rather than
-// silently doing nothing — the link is selectable text either way
+// silently doing nothing - the link is selectable text either way
 // (`user-select: all` above), so a copy is always possible by hand.
-// One list, up to two badges a row. Rebuilt from scratch each render —
+// One list, up to two badges a row. Rebuilt from scratch each render - 
 // this runs again after a sync, and a delivered completion can change a
 // badge on a row that already exists.
 //
@@ -745,7 +1051,7 @@ function badge(text, extra) {
   return el;
 }
 
-// The three-state evidence icon every skill row carries (NIP-QW03 §5):
+// The three-state evidence icon every skill row carries (NIP-QW03 5):
 // nothing but a self-claim, a commit-history hint, or a countersigned
 // contract. One glyph + word so it reads at a glance and still copies.
 function evidenceBadge(ev) {
@@ -758,28 +1064,47 @@ function levelBadge(level) {
   return level ? badge('▲ ' + level, 'level') : null;
 }
 
-// sector/domain -> [rows], in tag order, groups sorted. `s.group` comes
-// pre-computed from the backend so the UI never re-parses a tag.
+// sector -> [ [domain, rows], … ]. `s.group` comes pre-computed from the
+// backend as "sector/domain" (or a bare "sector"); the collapsible panel
+// is the sector - "it/backend" and "it/frontend" roll up under one IT
+// panel - with a sub-header per domain inside it. Sectors and domains
+// both sorted; rows keep backend order.
 function groupSkills(skills) {
-  const groups = new Map();
+  const sectors = new Map();
+  const seen = new Set();
   for (const s of skills) {
-    const k = s.group || '—';
-    if (!groups.has(k)) groups.set(k, []);
-    groups.get(k).push(s);
+    if (seen.has(s.tag)) continue;   // a tag can arrive declared *and* earned
+    seen.add(s.tag);
+    const g = s.group || ' - ';
+    const slash = g.indexOf('/');
+    const sector = slash < 0 ? g : g.slice(0, slash);
+    const domain = slash < 0 ? '' : g.slice(slash + 1);
+    if (!sectors.has(sector)) sectors.set(sector, new Map());
+    const doms = sectors.get(sector);
+    if (!doms.has(domain)) doms.set(domain, []);
+    doms.get(domain).push(s);
   }
-  return [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  return [...sectors.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([sector, doms]) => [
+      sector,
+      [...doms.entries()].sort((a, b) => a[0].localeCompare(b[0])),
+    ]);
 }
 
+const sectorCount = (doms) => doms.reduce((n, [, rows]) => n + rows.length, 0);
+
 // Render `skills` into `list` (a <ul class="skills">) as one collapsible
-// <details> panel per group, each row built by `rowFn`. Rebuilt from
+// <details> panel per sector, each row built by `rowFn`. Rebuilt from
 // scratch each call. Panels open by default only when the whole set is
-// small — 2 groups or fewer with 5 items or fewer in each; past that they
-// start collapsed so a long list stays scannable by field.
+// small - 2 sectors or fewer with 5 skills or fewer in each; past that
+// they start collapsed so a long list stays scannable by field.
 function renderGrouped(list, skills, rowFn) {
   list.textContent = '';
-  const groups = groupSkills(skills);
-  const expand = groups.length <= 2 && groups.every(([, rows]) => rows.length <= 5);
-  for (const [group, rows] of groups) {
+  const sectors = groupSkills(skills);
+  const expand = sectors.length <= 2
+    && sectors.every(([, doms]) => sectorCount(doms) <= 5);
+  for (const [sector, doms] of sectors) {
     const li = document.createElement('li');
     li.className = 'skill-group';
 
@@ -787,48 +1112,32 @@ function renderGrouped(list, skills, rowFn) {
     panel.open = expand;
 
     const summary = document.createElement('summary');
-    summary.textContent = group;
+    summary.textContent = sector === ' - ' ? 'Other' : sector.toUpperCase();
     const count = document.createElement('span');
     count.className = 'group-count';
-    count.textContent = rows.length;
+    count.textContent = sectorCount(doms);
     summary.appendChild(count);
     panel.appendChild(summary);
 
     const inner = document.createElement('ul');
     inner.className = 'skills';
-    for (const s of rows) inner.appendChild(rowFn(s));
+    // A domain sub-header only earns its line when the sector actually
+    // splits into more than one - under a lone domain it just repeats.
+    const showDomains = doms.length > 1;
+    for (const [domain, rows] of doms) {
+      if (showDomains && domain) {
+        const head = document.createElement('li');
+        head.className = 'group-head';
+        head.textContent = domain;
+        inner.appendChild(head);
+      }
+      for (const s of rows) inner.appendChild(rowFn(s));
+    }
     panel.appendChild(inner);
 
     li.appendChild(panel);
     list.appendChild(li);
   }
-}
-
-// textContent throughout, never innerHTML: a skill tag is normalized
-// taxonomy today, but it arrives from signed records that other people
-// wrote, and the day one carries markup is not the day to find out this
-// took a shortcut.
-function renderSkills(skills) {
-  const list = document.getElementById('skills');
-  document.getElementById('skills-empty').hidden = skills.length > 0;
-  renderGrouped(list, skills, (s) => {
-    const row = document.createElement('li');
-    const tag = document.createElement('span');
-    tag.className = 'skill-tag';
-    tag.textContent = s.tag;
-    row.appendChild(tag);
-
-    const lvl = levelBadge(s.level);
-    if (lvl) row.appendChild(lvl);
-    if (s.reviewed) row.appendChild(badge('reviewed · ' + s.reviewed, ''));
-    if (s.contracts > 0) {
-      const score = s.rating == null ? '' : ' · score ' + s.rating.toFixed(1);
-      const n = s.contracts === 1 ? '1 contract' : s.contracts + ' contracts';
-      row.appendChild(badge(n + score, 'contract'));
-    }
-    row.appendChild(evidenceBadge(s.evidence));
-    return row;
-  });
 }
 
 // One external-link row: network label + the URL as an anchor. Anchors so
@@ -850,7 +1159,7 @@ function linkRow(l) {
 }
 
 // A detached <ul class="links"> of the given links, or null if there are
-// none — for anywhere that shows someone's links inline.
+// none - for anywhere that shows someone's links inline.
 function linksList(links) {
   if (!links || !links.length) return null;
   const ul = document.createElement('ul');
@@ -873,12 +1182,19 @@ function renderLinks(links) {
 // `{network, url}`. The taxonomy resolves anything typed (synonyms and
 // all) inside profile_set, so a bad entry comes back as an error naming
 // it rather than being dropped. NIP-QW03: fewer than 80 skills, each
-// 1-79 chars; `source` is left off — only commit-analysis sets it, and that
+// 1-79 chars; `source` is left off - only commit-analysis sets it, and that
 // producer is not wired yet.
 const MAX_TAGS = 79;  // NIP-QW03: fewer than 80 per profile
 const LEVELS = ['beginner', 'intermediate', 'senior', 'expert'];
 let profileSkills = [];   // [{ tag, level: string|null }]
 let profileLinks = [];    // [{ network, url }]
+// Structured detail. Each entry is a flat { ...fields, visibility } - the
+// same shape the backend's LocalEmployment/… serialize as (serde flatten),
+// so it round-trips through /api/profile_{get,set} untouched. Mutated in
+// place (never reassigned) so makeEntryList's closure stays valid.
+const profileEmployment = [];
+const profileEducation = [];
+const profileCerts = [];
 
 async function fillTaxonomy() {
   const leaves = await invoke('taxonomy_leaves');
@@ -891,15 +1207,122 @@ async function fillTaxonomy() {
   }
 }
 
+// Fill a headline/bio field + its visibility <select> from a
+// { value, visibility } the backend returned (absent -> empty + public).
+function setField(id, f) {
+  document.getElementById(id).value = (f && f.value) || '';
+  document.getElementById(id + '-vis').value = (f && f.visibility) || 'public';
+}
+function readField(id) {
+  return {
+    value: document.getElementById(id).value,
+    visibility: document.getElementById(id + '-vis').value,
+  };
+}
+
+// A Public / Contacts / Private picker, its value preset.
+function visSelect(v) {
+  const s = document.createElement('select');
+  s.className = 'vis';
+  for (const [val, label] of [
+    ['public', 'Public'],
+    ['contacts', 'Contacts - local for now'],
+    ['private', 'Private'],
+  ]) {
+    const o = document.createElement('option');
+    o.value = val;
+    o.textContent = label;
+    s.appendChild(o);
+  }
+  s.value = v || 'public';
+  return s;
+}
+
+// Replace an array's contents in place (keeps closures over it valid).
+function replaceArr(arr, next) {
+  arr.length = 0;
+  for (const x of next || []) arr.push(x);
+}
+
+// Bind a repeating entry editor to `store` (an array of flat objects).
+// `fields` = [{ key, label, ta? }]. Returns its render fn.
+function makeEntryList(store, containerId, addBtnId, fields) {
+  function render() {
+    const c = document.getElementById(containerId);
+    c.textContent = '';
+    store.forEach((row, i) => {
+      const card = document.createElement('div');
+      card.className = 'entry';
+      for (const f of fields) {
+        const el = document.createElement(f.ta ? 'textarea' : 'input');
+        if (f.ta) el.rows = 2;
+        el.placeholder = f.label;
+        el.maxLength = f.ta ? 399 : 159;
+        el.value = row[f.key] || '';
+        el.oninput = () => { row[f.key] = el.value; };
+        card.appendChild(el);
+      }
+      const foot = document.createElement('div');
+      foot.className = 'entry-foot';
+      const vs = visSelect(row.visibility);
+      vs.onchange = () => { row.visibility = vs.value; };
+      const rm = document.createElement('button');
+      rm.type = 'button';
+      rm.textContent = 'Remove';
+      rm.onclick = () => { store.splice(i, 1); render(); };
+      foot.append(vs, rm);
+      card.appendChild(foot);
+      c.appendChild(card);
+    });
+  }
+  document.getElementById(addBtnId).onclick = () => {
+    const blank = { visibility: 'public' };
+    for (const f of fields) blank[f.key] = '';
+    store.push(blank);
+    render();
+  };
+  return render;
+}
+
+const renderEmployment = makeEntryList(profileEmployment, 'emp-list', 'emp-add', [
+  { key: 'title', label: 'Title' },
+  { key: 'org', label: 'Organisation' },
+  { key: 'start', label: 'From - year' },
+  { key: 'end', label: 'To - year (blank = current)' },
+  { key: 'summary', label: 'What you did', ta: true },
+]);
+const renderEducation = makeEntryList(profileEducation, 'edu-list', 'edu-add', [
+  { key: 'school', label: 'School' },
+  { key: 'field', label: 'Field of study' },
+  { key: 'start', label: 'From - year' },
+  { key: 'end', label: 'To - year' },
+]);
+const renderCerts = makeEntryList(profileCerts, 'cert-list', 'cert-add', [
+  { key: 'name', label: 'Certification' },
+  { key: 'issuer', label: 'Issuer' },
+  { key: 'year', label: 'Year' },
+  { key: 'url', label: 'Verify URL (optional)' },
+]);
+
 async function showProfile() {
   const p = await invoke('profile_get');
-  document.getElementById('profile-name').value = p.display_name || '';
+  setField('profile-name', p.name || (p.display_name ? { value: p.display_name, visibility: 'public' } : null));
+  setField('profile-alt-name', p.alt_name);
+  setField('profile-headline', p.headline);
+  setField('profile-bio', p.bio);
+  setField('profile-location', p.location);
+  replaceArr(profileEmployment, p.employment);
+  replaceArr(profileEducation, p.education);
+  replaceArr(profileCerts, p.certifications);
+  renderEmployment();
+  renderEducation();
+  renderCerts();
   const levels = p.levels || {};
   profileSkills = (p.tags || []).map((t) => ({ tag: t, level: levels[t] || null }));
   profileLinks = (p.links || []).map((l) => ({ network: l.network, url: l.url }));
   renderChips();
   renderLinkChips();
-  // The score list is the earned side of the same picture — `identity`
+  // The score list is the earned side of the same picture - `identity`
   // folds it from countersigned contract history.
   const id = await invoke('identity');
   renderProfileScores(id.skills || []);
@@ -907,7 +1330,7 @@ async function showProfile() {
 
 // One row per skill, grouped by field, its score up front. The score is
 // the mean rating counterparties gave the countersigned work carrying
-// that tag (0–5) — the only axis in QW that produces a number. Sorted
+// that tag (0-5) - the only axis in QW that produces a number. Sorted
 // proven-first within each group: that is what a reader is looking for.
 function renderProfileScores(skills) {
   const list = document.getElementById('profile-scores');
@@ -934,13 +1357,13 @@ function renderProfileScores(skills) {
       li.appendChild(badge('score ' + s.rating.toFixed(1) + ' / 5', 'contract'));
       li.appendChild(badge(n, ''));
     } else if (s.contracts > 0) {
-      // Countersigned, but no counterparty recorded a rating — proven, unscored.
+      // Countersigned, but no counterparty recorded a rating - proven, unscored.
       li.appendChild(badge('unrated · ' + n, ''));
     }
     if (s.reviewed) li.appendChild(badge('reviewed · ' + s.reviewed, ''));
     li.appendChild(evidenceBadge(s.evidence));
     // Earned through contracts but never published, so a query for it cannot
-    // route to you — worth adding below.
+    // route to you - worth adding below.
     if (!s.declared) li.appendChild(badge('not published', ''));
     return li;
   });
@@ -1001,7 +1424,7 @@ document.getElementById('profile-add').onclick = () => {
   const status = document.getElementById('profile-status');
   if (!v) return;
   if (profileSkills.length >= MAX_TAGS) {
-    status.textContent = `At most ${MAX_TAGS} tags — remove one first.`;
+    status.textContent = `At most ${MAX_TAGS} tags - remove one first.`;
     return;
   }
   if (!profileSkills.some((s) => s.tag === v)) profileSkills.push({ tag: v, level: null });
@@ -1040,7 +1463,7 @@ const NETWORKS = [
     build: a => { const [u, h] = a.replace(/^@/, '').split('@'); return `https://${h}/@${u}`; },
     parse: (host, p, raw) => (raw.includes('/@') && p[0] && p[0].startsWith('@')
       ? p[0].slice(1) + '@' + host : null) },
-  { v: 'custom',        label: 'Custom — full URL', prefix: '' },
+  { v: 'custom',        label: 'Custom - full URL', prefix: '' },
 ];
 const netByV = Object.fromEntries(NETWORKS.map(n => [n.v, n]));
 
@@ -1148,9 +1571,16 @@ document.getElementById('profile-save').onclick = async () => {
   try {
     await invoke('profile_set', {
       edit: {
-        display_name: document.getElementById('profile-name').value || null,
+        display_name: readField('profile-name'),
+        alt_name: readField('profile-alt-name'),
         skills: profileSkills.map((s) => ({ tag: s.tag, level: s.level || null })),
         links: profileLinks.map((l) => ({ network: l.network, url: l.url })),
+        headline: readField('profile-headline'),
+        bio: readField('profile-bio'),
+        location: readField('profile-location'),
+        employment: profileEmployment,
+        education: profileEducation,
+        certifications: profileCerts,
       },
     });
     status.textContent = 'Signed. Publishing…';
@@ -1188,7 +1618,7 @@ function renderRecognition(r) {
       if (c.corroborated_by) {
         const by = document.createElement('span');
         by.className = 'muted'; by.style.fontSize = '11px';
-        by.textContent = ' — ' + c.corroborated_by;
+        by.textContent = ' - ' + c.corroborated_by;
         li.appendChild(by);
       }
       ul.appendChild(li);
@@ -1223,7 +1653,7 @@ document.getElementById('rec-go').onclick = async () => {
     const until = r.expires_at
       ? ' · valid until ' + new Date(r.expires_at * 1000).toLocaleDateString() : '';
     status.textContent =
-      'Signed by the bureau' + until + '. Nothing published — copy what you want into your tags above.';
+      'Signed by the bureau' + until + '. Nothing published - copy what you want into your tags above.';
   } catch (e) {
     status.textContent = String(e);
   }
@@ -1273,10 +1703,10 @@ async function showNegotiations() {
     st.textContent = n.your_move ? 'your move' : n.state;
     line.append(party, role, st);
     // Fails this viewer's admission pre-filter (Filter tab). Shown, never
-    // hidden — the human may always admit it (abstract.md).
+    // hidden - the human may always admit it (abstract.md).
     if (n.passes_filter === false) line.appendChild(badge('below your filter', ''));
-    // Your own trust read on the counterparty — pub_window liveness plus
-    // §5 credit-path standing, so a proposal is not judged on terms alone.
+    // Your own trust read on the counterparty - pub_window liveness plus
+    // 5 credit-path standing, so a proposal is not judged on terms alone.
     try {
       const tr = await invoke('trust', { pubkey: n.counterparty_pubkey });
       trustBadge(line, tr);
@@ -1289,7 +1719,7 @@ async function showNegotiations() {
     const money = `${t.hours}h × ${t.rate}` + (t.ko ? ` × ko ${t.ko}` : '') + (t.km ? ` × km ${t.km}` : '');
     const quants = (t.hours * t.rate * (t.ko || 1) * (t.km || 1)).toFixed(2);
     terms.textContent = `${t.skill_tags.join(', ')} · ${money} = ${quants} Quants` +
-      (n.rounds ? ` · round ${n.rounds}` : '') + ` — ${t.terms}`;
+      (n.rounds ? ` · round ${n.rounds}` : '') + ` - ${t.terms}`;
     li.appendChild(terms);
 
     // NIP-QW04 dispute thread: the record is never edited, annotations
@@ -1333,7 +1763,7 @@ async function showNegotiations() {
       b.onclick = () => acceptOffer(n.offer_event_id);
       actions.appendChild(b);
     }
-    // Available in any state — a limbo contract is exactly what an
+    // Available in any state - a limbo contract is exactly what an
     // annotation is for.
     const ann = document.createElement('button');
     ann.type = 'button';
@@ -1343,7 +1773,7 @@ async function showNegotiations() {
     actions.appendChild(ann);
 
     // View: reveal the underlying record's ids (the summary truncates
-    // them). Hide: local-only filter — see the note under the list.
+    // them). Hide: local-only filter - see the note under the list.
     const detail = document.createElement('div');
     detail.className = 'muted row-detail';
     detail.hidden = true;
@@ -1375,8 +1805,8 @@ async function showNegotiations() {
 }
 
 // A dispute annotation (kind 9030). Low-ceremony prompt flow, matching
-// the rest of this shell: pick a kind, type the note, and — for an audit
-// opinion — an outcome.
+// the rest of this shell: pick a kind, type the note, and - for an audit
+// opinion - an outcome.
 async function annotateOffer(offerId) {
   const kind = (window.prompt(
     'Annotation kind: reply, audit_request, or audit_opinion', 'reply') || '').trim();
@@ -1416,6 +1846,91 @@ function renderNegChips() {
   });
 }
 
+// --- "open to work" post (NIP-QW14 broadcast) -----------------------
+const bcSkills = [];
+
+function renderBcChips() {
+  const box = document.getElementById('bc-chips');
+  box.textContent = '';
+  bcSkills.forEach((tag, i) => {
+    const li = document.createElement('li');
+    li.className = 'chip';
+    const label = document.createElement('span');
+    label.textContent = tag;
+    const x = document.createElement('button');
+    x.type = 'button';
+    x.textContent = '×';
+    x.setAttribute('aria-label', 'remove ' + tag);
+    x.onclick = () => { bcSkills.splice(i, 1); renderBcChips(); };
+    li.append(label, x);
+    box.appendChild(li);
+  });
+}
+
+document.getElementById('bc-skill-add').onclick = () => {
+  const input = document.getElementById('bc-skill');
+  const v = input.value.trim();
+  if (!v) return;
+  if (!bcSkills.includes(v)) bcSkills.push(v);
+  input.value = '';
+  renderBcChips();
+};
+document.getElementById('bc-skill').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); document.getElementById('bc-skill-add').click(); }
+});
+
+async function showBroadcasts() {
+  let rows = [];
+  try { rows = await invoke('broadcasts'); } catch { /* not signed in */ return; }
+  const list = document.getElementById('bc-list');
+  list.textContent = '';
+  document.getElementById('bc-empty').hidden = rows.length > 0;
+  for (const b of rows) {
+    const li = document.createElement('li');
+    const tag = document.createElement('span');
+    tag.className = 'skill-tag';
+    tag.textContent = 'open to work · ' + b.skill_tags.join(', ');
+    li.appendChild(tag);
+    li.appendChild(badge(b.mine ? 'mine' : (b.originator_npub.slice(0, 12) + '…'), b.mine ? 'contract' : ''));
+    if (b.hours) li.appendChild(badge(b.hours + 'h / ' + (b.period || 'week'), ''));
+    const days = Math.max(0, Math.round((b.expires_at - Date.now() / 1000) / 86400));
+    li.appendChild(badge(days + 'd left', ''));
+    if (b.note) {
+      const n = document.createElement('span');
+      n.className = 'muted';
+      n.style.cssText = 'flex-basis:100%;font-size:12px';
+      n.textContent = b.note;
+      li.appendChild(n);
+    }
+    list.appendChild(li);
+  }
+}
+
+document.getElementById('bc-send').onclick = async () => {
+  const status = document.getElementById('bc-status');
+  status.textContent = 'Signing…';
+  try {
+    const h = parseInt(document.getElementById('bc-hours').value, 10);
+    await invoke('originate_broadcast', {
+      preferred: bcSkills,   // empty = your whole published profile
+      note: document.getElementById('bc-note').value,
+      hours: Number.isFinite(h) && h > 0 ? h : null,
+      period: document.getElementById('bc-period').value,
+      ttl_days: parseInt(document.getElementById('bc-ttl').value, 10) || 7,
+    });
+    status.textContent = 'Signed. Pushing…';
+    await invoke('sync_now');
+    bcSkills.length = 0;
+    renderBcChips();
+    document.getElementById('bc-note').value = '';
+    document.getElementById('bc-hours').value = '';
+    await showBroadcasts();
+    status.textContent = 'Posted.';
+  } catch (e) {
+    status.textContent = String(e);
+  }
+};
+
 // abstract.md: Quants = Hours × Rate × ko × km. ko/km omitted read as 1.
 function updateNegPrice() {
   const h = parseFloat(document.getElementById('neg-hours').value);
@@ -1438,7 +1953,7 @@ for (const id of ['neg-hours', 'neg-rate', 'neg-ko', 'neg-km']) {
 
 // "avg": fill Rate with the mean of this identity's own accepted /
 // completed contracts, preferring ones that share a skill tag with the
-// draft — a market average from the record you already hold.
+// draft - a market average from the record you already hold.
 document.getElementById('neg-rate-avg').onclick = async () => {
   const status = document.getElementById('neg-status');
   try {
@@ -1500,7 +2015,7 @@ function openCounter(n) {
   document.getElementById('neg-km').value = n.head_terms.km ?? '';
   document.getElementById('neg-terms').value = n.head_terms.terms;
   updateNegPrice();
-  document.getElementById('propose-summary').textContent = 'Counter — replaces the current terms';
+  document.getElementById('propose-summary').textContent = 'Counter - replaces the current terms';
   document.getElementById('neg-send').textContent = 'Sign counter';
   document.getElementById('neg-cancel').hidden = false;
   document.getElementById('propose-box').open = true;
@@ -1608,7 +2123,7 @@ document.getElementById('copy').onclick = async () => {
   const status = document.getElementById('copy-status');
   status.textContent = (await copyText(me.invite_link))
     ? 'Copied.'
-    : 'Could not copy — select the link above and copy it by hand.';
+    : 'Could not copy - select the link above and copy it by hand.';
 };
 
 document.getElementById('follow').onclick = async () => {
@@ -1618,7 +2133,7 @@ document.getElementById('follow').onclick = async () => {
     status.textContent = 'Queued. It goes out on the next sync.';
     await showContacts();
     // An invite almost always exists because of an upcoming contract, so
-    // drop straight into the proposal box aimed at them — the offer will
+    // drop straight into the proposal box aimed at them - the offer will
     // point back at this introduction (from_introduction) as long as the
     // counterparty field still holds the key we just filled in.
     startProposalFromIntro(r);
@@ -1639,15 +2154,15 @@ document.getElementById('sync').onclick = async () => {
       // The running total, not the delta: it is what everything else reads,
       // and seeing it stay put after a sync is how you notice nothing landed.
       `. ${r.held} record${r.held === 1 ? '' : 's'} held.` +
-      (r.errors.length ? ` — ${r.errors.join('; ')}` : '');
+      (r.errors.length ? ` - ${r.errors.join('; ')}` : '');
     document.getElementById('mail-tallies').textContent =
       `Outbox: ${r.still_queued} waiting to send. Ledger: ${r.held} record${r.held === 1 ? '' : 's'} held.`;
     // A sync can deliver a countersigned completion, which changes what is
-    // earned — so re-read it (Identity's skill list and Profile's scores)
+    // earned - so re-read it (Identity's skill list and Profile's scores)
     // rather than leaving a stale list on screen.
     await showIdentity();
     await showProfile();
-    // It can also deliver a counteroffer or an Accept — the same reason.
+    // It can also deliver a counteroffer or an Accept - the same reason.
     await showNegotiations();
     // …and referral traffic: a new contact, or an answer to an open query.
     await showContacts();
@@ -1765,7 +2280,7 @@ document.getElementById('bureau-save').onclick = async () => {
   } catch (e) { status.textContent = String(e); }
 };
 
-// --- broadcast propagation policy (NIP-QW14 §4) -----------------
+// --- broadcast propagation policy (NIP-QW14 4) -----------------
 const PROP_KINDS = ['proposal', 'demand', 'profile', 'news', 'review'];
 // each field: how it maps between the wire (seconds/bytes) and the cell
 const PROP_FIELDS = [
@@ -1852,8 +2367,8 @@ document.getElementById('filter-save').onclick = async () => {
     });
     status.textContent =
       (p.min_reputation == null && p.position_limit == null)
-        ? 'Saved — filter off, every proposal reaches you.'
-        : 'Saved. Failing proposals are flagged on Contracts, not hidden.';
+        ? 'Saved - filter off, every proposal reaches you.'
+        : 'Saved. Failing proposals are flagged on Jobs, not hidden.';
     await showNegotiations();
   } catch (e) {
     status.textContent = String(e);
@@ -1865,7 +2380,7 @@ document.getElementById('filter-save').onclick = async () => {
 let lastQueryId = null;
 
 // Per-viewer trust, from verified credit only. `null` hops means
-// "unknown — no evidence reaches them", never zero.
+// "unknown - no evidence reaches them", never zero.
 function trustBadge(li, p) {
   if (p.trust_hops === undefined) return;
   if (p.trust_hops === null) {
@@ -1901,24 +2416,78 @@ function renderPeople(el, people, extra) {
   }
 }
 
+// The raw contact list, fetched once per showContacts(); the search /
+// sort / filter controls re-render from it without another round trip.
+let allContacts = [];
+
+function renderContacts() {
+  const q = document.getElementById('contacts-search').value.trim().toLowerCase();
+  const sort = document.getElementById('contacts-sort').value;
+  const filter = document.getElementById('contacts-filter').value;
+
+  let rows = allContacts.slice();
+
+  // filter
+  rows = rows.filter((c) => {
+    const hidden = hiddenPeople.has(c.pubkey);
+    if (filter === 'hidden') return hidden;
+    if (hidden) return false;
+    if (filter === 'trusted') return c.trust_hops != null;
+    if (filter === 'unknown') return c.trust_hops == null;
+    if (filter === 'countersigned') return (c.earned_skill_tags || []).length > 0;
+    return true;
+  });
+
+  // search: name, npub or any skill tag
+  if (q) {
+    rows = rows.filter((c) => {
+      const hay = [
+        c.display_name || '', c.npub || '',
+        ...(c.declared_skill_tags || []), ...(c.earned_skill_tags || []),
+      ].join(' ').toLowerCase();
+      return hay.includes(q);
+    });
+  }
+
+  // sort
+  const name = (c) => (c.display_name || c.npub || c.pubkey || '').toLowerCase();
+  rows.sort((a, b) => {
+    switch (sort) {
+      case 'trust':   return (b.trust_score ?? -1) - (a.trust_score ?? -1) || name(a).localeCompare(name(b));
+      case 'hops':    return (a.trust_hops ?? 99) - (b.trust_hops ?? 99) || name(a).localeCompare(name(b));
+      case 'skills':  return ((b.declared_skill_tags || []).length + (b.earned_skill_tags || []).length)
+                           - ((a.declared_skill_tags || []).length + (a.earned_skill_tags || []).length)
+                           || name(a).localeCompare(name(b));
+      case 'balance': return (b.net_position || 0) - (a.net_position || 0) || name(a).localeCompare(name(b));
+      default:        return name(a).localeCompare(name(b));
+    }
+  });
+
+  renderPeople(document.getElementById('contacts'), rows, contactExtra);
+  document.getElementById('contacts-empty').hidden = allContacts.length > 0;
+  const hidn = allContacts.filter((c) => hiddenPeople.has(c.pubkey)).length;
+  document.getElementById('contacts-count').textContent =
+    allContacts.length
+      ? `${rows.length} of ${allContacts.length} shown${hidn ? ` · ${hidn} hidden` : ''}`
+      : '';
+}
+
 async function showContacts() {
   try {
-    const cs = await invoke('contacts');
-    const showHidden = document.getElementById('contacts-show-hidden').checked;
-    const shown = cs.filter((c) => showHidden || !hiddenPeople.has(c.pubkey));
-    document.getElementById('contacts-empty').hidden = cs.length > 0;
-    renderPeople(document.getElementById('contacts'), shown, contactExtra);
-    const hp = cs.filter((c) => hiddenPeople.has(c.pubkey)).length;
-    document.getElementById('contacts-hidden-count').textContent = hp;
-    document.getElementById('contacts-hidden-note').hidden = hp === 0;
+    allContacts = await invoke('contacts');
+    renderContacts();
     const np = await invoke('net_position');
     document.getElementById('net-position').textContent =
       np ? `Your net position across everyone: ${np > 0 ? '+' : ''}${np.toFixed(1)} Quants.` : '';
   } catch { /* not signed in yet */ }
 }
 
+document.getElementById('contacts-search').addEventListener('input', renderContacts);
+document.getElementById('contacts-sort').addEventListener('change', renderContacts);
+document.getElementById('contacts-filter').addEventListener('change', renderContacts);
+
 // Per-contact controls appended by renderPeople. View pulls their held
-// profile if this client has one — the referral answer or a sync could
+// profile if this client has one - the referral answer or a sync could
 // have carried it, links and levels included. Those links are the
 // "verify me elsewhere until a job vouches" surface, so a viewer needs to
 // see them. Hide is the local-only filter.
@@ -1952,9 +2521,9 @@ function contactExtra(li, p) {
       if (prof) {
         const levels = prof.levels || {};
         const tags = (prof.tags || []).map((t) => levels[t] ? `${t} (${levels[t]})` : t);
-        summary.textContent = npub +
-          (prof.display_name ? ' · ' + prof.display_name : '') +
-          (tags.length ? ' · ' + tags.join(', ') : '');
+        // The name is already in the row header — the detail line is the
+        // full npub plus their skills, not a second copy of the name.
+        summary.textContent = npub + (tags.length ? ' · ' + tags.join(', ') : '');
         const links = linksList(prof.links);
         if (links) detail.appendChild(links);
       }
@@ -1973,7 +2542,7 @@ function contactExtra(li, p) {
       if (hiddenPeople.has(p.pubkey)) hiddenPeople.delete(p.pubkey);
       else hiddenPeople.add(p.pubkey);
       saveHidden(HIDDEN_PEOPLE_KEY, hiddenPeople);
-      showContacts();
+      renderContacts();
     };
     bar.appendChild(hide);
   }
@@ -2006,7 +2575,7 @@ document.getElementById('find-go').onclick = async () => {
     status.textContent =
       (r.own_match ? 'You match this yourself. ' : '') +
       (r.forwarded
-        ? `Sent to ${r.forwarded} contact${r.forwarded === 1 ? '' : 's'} — Sync to deliver it, then Sync again for answers.`
+        ? `Sent to ${r.forwarded} contact${r.forwarded === 1 ? '' : 's'} - Sync to deliver it, then Sync again for answers.`
         : 'No tag-similar contact to forward to yet.');
   } catch (e) {
     status.textContent = String(e);
@@ -2015,13 +2584,13 @@ document.getElementById('find-go').onclick = async () => {
 
 // --- keys & recovery (multi-user qw-web only) ----------------------
 // The master key never moves; each row here is one KEK sealing a copy of
-// it. `kek_list` is metadata only — no key material crosses the wire.
+// it. `kek_list` is metadata only - no key material crosses the wire.
 async function showKeys() {
   let keys;
   try {
     keys = await invoke('kek_list');
   } catch {
-    return; // not a multi-user host, or not signed in — nothing to show
+    return; // not a multi-user host, or not signed in - nothing to show
   }
   const list = document.getElementById('keys');
   list.textContent = '';
@@ -2037,7 +2606,7 @@ async function showKeys() {
     when.textContent = new Date(k.created_at * 1000).toISOString().slice(0, 10);
     li.appendChild(when);
 
-    // The primary passphrase has no Remove — change it with "Add" then
+    // The primary passphrase has no Remove - change it with "Add" then
     // sign in on the new one, or it is dropped from under you.
     if (k.tag !== 'passphrase') {
       const rm = document.createElement('button');
@@ -2077,7 +2646,7 @@ document.getElementById('kek-add').onclick = async () => {
     await invoke('kek_add', { tag, secret });
     document.getElementById('kek-label').value = '';
     document.getElementById('kek-secret').value = '';
-    status.textContent = 'Added — it signs you in exactly like the first one.';
+    status.textContent = 'Added - it signs you in exactly like the first one.';
     await showKeys();
   } catch (e) {
     status.textContent = String(e);
@@ -2085,7 +2654,7 @@ document.getElementById('kek-add').onclick = async () => {
 };
 
 // Reused by registration (first code) and the Regenerate button. Puts the
-// code in the accent box and pulls the section into view — it is shown
+// code in the accent box and pulls the section into view - it is shown
 // once and never comes back from the server.
 function revealRecoveryCode(code, message) {
   // The code lives in the Security page now, so make sure that page is the
@@ -2131,7 +2700,7 @@ document.getElementById('seed-reveal').onclick = async () => {
 // data-page="…"> shown alone. The last one visited is remembered so a
 // reload lands where you were.
 
-const PAGES = ['identity', 'profile', 'contracts', 'contacts', 'filter', 'mail', 'security'];
+const PAGES = ['identity', 'profile', 'contracts', 'contacts', 'discover', 'filter', 'mail', 'security'];
 
 function showPage(name) {
   if (!PAGES.includes(name)) name = 'identity';
@@ -2168,14 +2737,13 @@ function loadHidden(key) {
 }
 function saveHidden(key, set) {
   try { localStorage.setItem(key, JSON.stringify([...set])); }
-  catch { /* private mode — the filter just will not persist */ }
+  catch { /* private mode - the filter just will not persist */ }
 }
 const HIDDEN_CONTRACTS_KEY = 'qw.hidden.contracts';
 const HIDDEN_PEOPLE_KEY = 'qw.hidden.people';
 const hiddenContracts = loadHidden(HIDDEN_CONTRACTS_KEY);
 const hiddenPeople = loadHidden(HIDDEN_PEOPLE_KEY);
 document.getElementById('contracts-show-hidden').addEventListener('change', showNegotiations);
-document.getElementById('contacts-show-hidden').addEventListener('change', showContacts);
 
 // --- sign in / register (multi-user qw-web only) --------------------
 //
@@ -2198,12 +2766,12 @@ async function authFetch(path, body) {
 }
 
 // The Security tab's "about" block: which build this host is running, plus
-// the hosted-preview disclaimer shown at sign-in — same text, one source.
+// the hosted-preview disclaimer shown at sign-in - same text, one source.
 function renderAbout(info) {
   const v = document.getElementById('about-version');
   const b = document.getElementById('about-build');
-  if (v) v.textContent = (info && info.version) || '—';
-  if (b) b.textContent = (info && info.build) || '—';
+  if (v) v.textContent = (info && info.version) || ' - ';
+  if (b) b.textContent = (info && info.build) || ' - ';
   if (isWeb) {
     const dst = document.getElementById('security-disclaimer');
     const src = document.getElementById('web-disclaimer');
@@ -2212,6 +2780,20 @@ function renderAbout(info) {
 }
 
 let sessionInfo = null;
+
+// The nickname just used to sign in (multi-user). Kept so the profile
+// editor can seed a sensible default without a round trip - most people
+// carry one handle across networks. Empty on a plain reload.
+let loginNick = '';
+
+// Seed the "Links to other networks" handle with your login nickname, but
+// only when it is empty and only right after an explicit sign-in - it is
+// a suggestion to type over, never an override.
+function prefillFromLogin() {
+  if (!loginNick) return;
+  const h = document.getElementById('link-handle');
+  if (h && !h.value) { h.value = loginNick; refreshLinkRow(); }
+}
 
 async function boot() {
   // One probe up front: is this a login host, and are we already on a
@@ -2229,6 +2811,7 @@ async function boot() {
     await fillTaxonomy();
     await showProfile();
     await showNegotiations();
+    await showBroadcasts();
     await showContacts();
     await showServers();
     await showFilter();
@@ -2245,6 +2828,7 @@ async function boot() {
     // disclaimer, both worth having on every build.
     if (isWeb) document.getElementById('nav-security').hidden = false;
     renderAbout(sessionInfo);
+    prefillFromLogin();
     // Land on the last page visited; fall back to Identity, and never open
     // Security when its tab is not available (the Tauri shell).
     let start = 'identity';
@@ -2266,31 +2850,52 @@ async function boot() {
   }
 }
 
+let authing = false;
+
 async function doAuth(path) {
+  if (authing) return;   // Enter + click, or a double tap, must not fire twice
   const status = document.getElementById('auth-status');
+  const btnL = document.getElementById('auth-login');
+  const btnR = document.getElementById('auth-register');
   const nick = document.getElementById('auth-nick').value.trim();
   const secret = document.getElementById('auth-secret').value;
   if (!nick || !secret) {
     status.textContent = 'Nickname and passphrase are both required.';
     return;
   }
-  status.textContent = 'Working…';
+  const registering = path.endsWith('register');
+  authing = true;
+  btnL.disabled = true;
+  btnR.disabled = true;
+  const label = btnL.textContent;
+  btnL.textContent = registering ? 'Working…' : 'Signing in…';
+  status.textContent = registering
+    ? 'Registering and signing you in…'
+    : 'Signing in — stretching your passphrase, this takes a moment…';
   try {
     const data = await authFetch(path, { nick, secret });
+    loginNick = nick;
     document.getElementById('auth-secret').value = '';
     status.textContent = '';
     await boot();
-    // Registration mints a recovery code and returns it once — surface it
+    // Registration mints a recovery code and returns it once - surface it
     // straight away, in the Keys section boot() has just rendered.
     if (data && data.recovery_code) {
       revealRecoveryCode(
         data.recovery_code,
-        'This is your recovery code — the way back if you forget your passphrase. ' +
+        'This is your recovery code - the way back if you forget your passphrase. ' +
           'Write it down now; it is shown once and never stored.',
       );
     }
   } catch (e) {
     status.textContent = String(e);
+  } finally {
+    // boot() has hidden this panel on success; on failure the buttons
+    // come back so a retry is possible.
+    authing = false;
+    btnL.disabled = false;
+    btnR.disabled = false;
+    btnL.textContent = label;
   }
 }
 

@@ -1,7 +1,10 @@
 # QW knownby.work — Skills confirmed by the people you worked with and for. Found through friends of friends.
 
 A referral-network protocol for trust-based work exchange, built on
-Nostr. See `todo-impl.md` for the implementation plan and current status.
+Nostr. You post a demand — what you need — or a proposal — what you offer;
+the network walks your contacts to pair demands with proposals and returns
+a shortlist, ranked entirely by preferences you define on your own device.
+See `todo-impl.md` for the implementation plan and current status.
 
 **Status:** early prototype (protocol layer + a local referral-routing
 demo). Nothing here is ready for real transactions or real personal data.

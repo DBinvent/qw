@@ -25,22 +25,54 @@
   --radius-xl: calc(var(--radius) * 1.4);
 }
 
+/*
+ * Palette (2026-09-11): off the generic violet-on-zinc every dev-tool
+ * landing page defaults to, onto QW's own thing — a phosphor terminal.
+ * knownby.work is a peer protocol for people who read raw Nostr events;
+ * "hacker green on black" is the honest register for that audience, not
+ * a costume. (trust-atria-landing went the opposite way deliberately —
+ * amber-on-flat-black, enterprise-editorial restraint — because it's
+ * selling compliance to buyers who'd read matrix-green as unserious. QW
+ * is selling to exactly the crowd that reads it as home.)
+ *
+ *   - ground is near-black with a green cast, not neutral zinc
+ *   - one accent, a saturated terminal green, on both text and glow
+ *   - borders tinted green instead of grey — nothing here reads neutral
+ *   - tighter radius: a terminal window, not a rounded SaaS card
+ *   - danger stays red — the one color the palette does not recolor,
+ *     so an error still reads as an error against all the green
+ */
 :root {
   color-scheme: dark;
-  --background: #09090b;
-  --foreground: #fafafa;
-  --card: #111114;
-  --card-foreground: #fafafa;
-  --primary: #a78bfa;
-  --primary-foreground: #09090b;
-  --secondary: #18181b;
-  --secondary-foreground: #fafafa;
-  --muted: #18181b;
-  --muted-foreground: #a1a1aa;
-  --success: #34d399;
-  --danger: #fb7185;
-  --border: #27272a;
-  --radius: 0.625rem;
+  --background: #04100a;
+  --foreground: #c9f5d6;
+  --card: #081a10;
+  --card-foreground: #c9f5d6;
+  --primary: #00ff66;
+  --primary-foreground: #021a0c;
+  --secondary: #0e2417;
+  --secondary-foreground: #d6ffe4;
+  --muted: #0b1c12;
+  --muted-foreground: #6fae86;
+  --success: #22e07a;
+  --danger: #ff3b5c;
+  --border: #123321;
+  --radius: 0.3rem;
+
+  /* Filled buttons: a dim green centre, with the bright accent kept for the
+     border. A slab of #00ff66 at button size glares against this ground and
+     drags the eye off whatever the page is actually saying, while the same
+     colour in a 2px border reads as deliberate and still carries the accent.
+     Text goes pale mint rather than near-black — on a dark fill the
+     --primary-foreground ink would vanish. */
+  --primary-fill: #0b3a20;
+  --primary-fill-hover: #12522c;
+  --primary-text: #baffd6;
+  /* Idle/disabled: neutral grey rather than the green-tinted --border, so
+     "not actionable right now" reads as a different thing from a section
+     edge — and so a pending button is distinguishable from a live one by
+     more than the opacity it used to rely on. */
+  --btn-idle-border: #7e8a85;
 }
 
 @layer base {
@@ -50,9 +82,49 @@
   body {
     @apply bg-background text-foreground;
   }
+  /* A very faint CRT scan — texture, not a gimmick: opacity is low enough
+     to read as "this screen has a grain to it" rather than a pattern
+     anyone consciously notices. A pseudo-element rather than a DOM node
+     so no component needs to carry it; negative z-index on a fixed box
+     is the standard way to pin it behind the page without a wrapper. */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background-image: repeating-linear-gradient(
+      to bottom,
+      color-mix(in oklch, var(--primary) 6%, transparent) 0,
+      color-mix(in oklch, var(--primary) 6%, transparent) 1px,
+      transparent 1px,
+      transparent 3px
+    );
+  }
 }
 
-@utility glow-violet {
-  box-shadow: 0 0 0 1px color-mix(in oklch, var(--primary) 40%, transparent),
-    0 0 24px -4px color-mix(in oklch, var(--primary) 55%, transparent);
+/* Soft outer glow only. The 1px ring this used to carry doubled up as a
+   second, thinner border next to btn-accent's 2px one — and every element
+   using this utility is now one of those buttons. */
+@utility glow-accent {
+  box-shadow: 0 0 24px -4px color-mix(in oklch, var(--primary) 55%, transparent);
+}
+
+/* The filled accent button: dim centre, bold bright border. Pairs with
+   glow-accent above, which supplies the halo. */
+@utility btn-accent {
+  background-color: var(--primary-fill);
+  border: 2px solid var(--primary);
+  color: var(--primary-text);
+  font-weight: 600;
+
+  &:hover:not(:disabled) {
+    background-color: var(--primary-fill-hover);
+  }
+
+  &:disabled {
+    background-color: var(--secondary);
+    border-color: var(--btn-idle-border);
+    color: var(--muted-foreground);
+  }
 }

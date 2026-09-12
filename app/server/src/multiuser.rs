@@ -326,6 +326,8 @@ pub fn router(web: Arc<MuWeb>) -> Router {
         .route("/api/contacts", post(contacts))
         .route("/api/find_by_skill", post(find_by_skill))
         .route("/api/referral_results", post(referral_results))
+        .route("/api/originate_broadcast", post(originate_broadcast))
+        .route("/api/broadcasts", post(broadcasts))
         .route("/api/profile_of", post(profile_of))
         .route("/api/trust", post(trust))
         .route("/api/net_position", post(net_position))
@@ -418,8 +420,15 @@ async fn session_info(State(web): State<Arc<MuWeb>>, headers: HeaderMap) -> Resp
         .into_response()
 }
 
-async fn index() -> Html<&'static str> {
-    Html(include_str!("../../ui/index.html"))
+async fn index() -> Response {
+    // 5-minute cache: a redeploy shows up within the window on its own,
+    // even on a mobile browser that ignores a hard refresh. The UI is one
+    // small file baked into the binary.
+    (
+        [("cache-control", "public, max-age=300")],
+        Html(include_str!("../../ui/index.html")),
+    )
+        .into_response()
 }
 
 #[derive(Deserialize)]
@@ -610,6 +619,39 @@ async fn find_by_skill(
     Json(b): Json<FindBySkillBody>,
 ) -> Response {
     reply(with_session(web, headers, move |s| s.find_by_skill(&b.skill).map_err(text)).await)
+}
+
+#[derive(Deserialize)]
+struct OriginateBroadcastBody {
+    #[serde(default)]
+    preferred: Vec<String>,
+    #[serde(default)]
+    note: String,
+    #[serde(default)]
+    hours: Option<u32>,
+    #[serde(default)]
+    period: Option<String>,
+    #[serde(default = "default_ttl_days")]
+    ttl_days: u64,
+}
+fn default_ttl_days() -> u64 {
+    7
+}
+async fn originate_broadcast(
+    State(web): State<Arc<MuWeb>>,
+    headers: HeaderMap,
+    Json(b): Json<OriginateBroadcastBody>,
+) -> Response {
+    reply(
+        with_session(web, headers, move |s| {
+            s.originate_broadcast(&b.preferred, &b.note, b.hours, b.period.as_deref(), b.ttl_days)
+                .map_err(text)
+        })
+        .await,
+    )
+}
+async fn broadcasts(State(web): State<Arc<MuWeb>>, headers: HeaderMap) -> Response {
+    reply(with_session(web, headers, |s| Ok::<_, String>(s.broadcasts())).await)
 }
 
 #[derive(Deserialize)]

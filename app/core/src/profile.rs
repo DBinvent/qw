@@ -25,8 +25,9 @@
 use std::collections::BTreeMap;
 
 use qw_protocol::events::{
-    profile_skill_tags, Event, ExternalLink, ProfileSkillTags, SkillLevel, SkillSource,
-    KIND_PROFILE, KIND_PROFILE_SKILL_TAGS,
+    profile_skill_tags, Certification, Education, Employment, Event, ExternalLink, ProfileSkillTags,
+    SkillLevel, SkillSource, KIND_PROFILE, KIND_PROFILE_SKILL_TAGS, MAX_BIO_LEN, MAX_HEADLINE_LEN,
+    MAX_LOCATION_LEN, MAX_NAME_LEN,
 };
 use qw_protocol::identity::Identity;
 use serde::{Deserialize, Serialize};
@@ -43,10 +44,236 @@ pub const MAX_TAG_LEN: usize = qw_protocol::events::MAX_SKILL_TAG_LEN - 1;
 /// A profile carries a handful of links, not a link farm.
 pub const MAX_LINKS: usize = 8;
 
+/// How far a free-text profile field (`headline`, `bio`) is allowed to
+/// travel. See `app/profile-fields.md`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FieldVisibility {
+    /// Written into the published kind-10020 profile — everyone sees it.
+    #[default]
+    Public,
+    /// Reserved for a contacts-only channel (encrypted kind `10021`,
+    /// specced in `app/profile-fields.md`, unbuilt). Until that lands it
+    /// is held locally and **not** published — same as `Private`.
+    Contacts,
+    /// Never leaves this device.
+    Private,
+}
+
+impl FieldVisibility {
+    fn parse(s: &str) -> Self {
+        match s {
+            "private" => Self::Private,
+            "contacts" => Self::Contacts,
+            _ => Self::Public,
+        }
+    }
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Public => "public",
+            Self::Contacts => "contacts",
+            Self::Private => "private",
+        }
+    }
+}
+
+/// One free-text profile field held on the device: its value and how far
+/// it may travel. Only `Public` reaches the network today.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct ProfileField {
+    #[serde(default)]
+    pub value: String,
+    #[serde(default)]
+    pub visibility: FieldVisibility,
+}
+
+impl ProfileField {
+    /// The trimmed value if it is `Public` and non-empty — what
+    /// [`build_signed`] mirrors into the signed profile.
+    fn published(&self) -> Option<String> {
+        let v = self.value.trim();
+        (self.visibility == FieldVisibility::Public && !v.is_empty()).then(|| v.to_string())
+    }
+}
+
+fn trimmed(s: &str) -> String {
+    s.trim().to_string()
+}
+
+/// One work-history entry plus its own visibility. The editor holds every
+/// entry; only `Public` ones are mirrored into the signed profile.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct LocalEmployment {
+    #[serde(flatten)]
+    pub entry: Employment,
+    #[serde(default)]
+    pub visibility: FieldVisibility,
+}
+
+impl LocalEmployment {
+    fn is_blank(&self) -> bool {
+        self.entry.title.trim().is_empty() && self.entry.org.trim().is_empty()
+    }
+    fn published(&self) -> Option<Employment> {
+        (self.visibility == FieldVisibility::Public && !self.is_blank()).then(|| Employment {
+            title: trimmed(&self.entry.title),
+            org: trimmed(&self.entry.org),
+            start: trimmed(&self.entry.start),
+            end: trimmed(&self.entry.end),
+            summary: trimmed(&self.entry.summary),
+        })
+    }
+}
+
+/// One education entry plus its own visibility.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct LocalEducation {
+    #[serde(flatten)]
+    pub entry: Education,
+    #[serde(default)]
+    pub visibility: FieldVisibility,
+}
+
+impl LocalEducation {
+    fn is_blank(&self) -> bool {
+        self.entry.school.trim().is_empty()
+    }
+    fn published(&self) -> Option<Education> {
+        (self.visibility == FieldVisibility::Public && !self.is_blank()).then(|| Education {
+            school: trimmed(&self.entry.school),
+            field: trimmed(&self.entry.field),
+            start: trimmed(&self.entry.start),
+            end: trimmed(&self.entry.end),
+        })
+    }
+}
+
+/// One certification plus its own visibility.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct LocalCertification {
+    #[serde(flatten)]
+    pub entry: Certification,
+    #[serde(default)]
+    pub visibility: FieldVisibility,
+}
+
+impl LocalCertification {
+    fn is_blank(&self) -> bool {
+        self.entry.name.trim().is_empty()
+    }
+    fn published(&self) -> Option<Certification> {
+        (self.visibility == FieldVisibility::Public && !self.is_blank()).then(|| Certification {
+            name: trimmed(&self.entry.name),
+            issuer: trimmed(&self.entry.issuer),
+            year: trimmed(&self.entry.year),
+            url: trimmed(&self.entry.url),
+        })
+    }
+}
+
+/// Local, mostly-unpublished profile detail (NIP-QW03 additive fields +
+/// the visibility model in `app/profile-fields.md`). Every value lives
+/// here on the device; `Session::set_profile` copies the `Public` fields
+/// and entries into the signed kind-10020 event and leaves the rest local.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct ProfileLocal {
+    /// The holder's name and its visibility. Seeded from a pre-existing
+    /// published `display_name` the first time this record is written.
+    #[serde(default)]
+    pub name: ProfileField,
+    /// An alternate public name (alias) and its visibility.
+    #[serde(default)]
+    pub alt_name: ProfileField,
+    #[serde(default)]
+    pub headline: ProfileField,
+    #[serde(default)]
+    pub bio: ProfileField,
+    #[serde(default)]
+    pub location: ProfileField,
+    #[serde(default)]
+    pub employment: Vec<LocalEmployment>,
+    #[serde(default)]
+    pub education: Vec<LocalEducation>,
+    #[serde(default)]
+    pub certifications: Vec<LocalCertification>,
+}
+
+/// What the editor sends for one free-text field.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ProfileFieldEdit {
+    #[serde(default)]
+    pub value: String,
+    #[serde(default)]
+    pub visibility: String,
+}
+
+impl From<&ProfileFieldEdit> for ProfileField {
+    fn from(e: &ProfileFieldEdit) -> Self {
+        ProfileField {
+            value: e.value.trim().to_string(),
+            visibility: FieldVisibility::parse(&e.visibility),
+        }
+    }
+}
+
+impl From<&ProfileField> for ProfileFieldEdit {
+    fn from(f: &ProfileField) -> Self {
+        ProfileFieldEdit {
+            value: f.value.clone(),
+            visibility: f.visibility.as_str().to_string(),
+        }
+    }
+}
+
+/// One free-text field as a shell shows it: value plus its visibility as
+/// a lowercase string.
+#[derive(Debug, Clone, Serialize)]
+pub struct FieldView {
+    pub value: String,
+    pub visibility: String,
+}
+
+impl From<&ProfileField> for FieldView {
+    fn from(f: &ProfileField) -> Self {
+        FieldView {
+            value: f.value.clone(),
+            visibility: f.visibility.as_str().to_string(),
+        }
+    }
+}
+
 /// The most recent profile, as a shell shows it.
 #[derive(Debug, Clone, Serialize)]
 pub struct ProfileView {
+    /// The effective name for a legacy reader — the local value if the
+    /// owner has one, else the published one. Prefer `name` (carries the
+    /// visibility) in a new client.
     pub display_name: Option<String>,
+    /// Name + visibility, and the alternate public name + visibility.
+    /// Filled by `Session::profile_view` from [`ProfileLocal`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<FieldView>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub alt_name: Option<FieldView>,
+    /// Free-text prose held locally, each with its visibility. Filled by
+    /// `Session::profile_view` from the persisted [`ProfileLocal`], not by
+    /// [`ProfileView::from_record`] (the signed event only carries the
+    /// `Public` ones).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub headline: Option<FieldView>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bio: Option<FieldView>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub location: Option<FieldView>,
+    /// Structured detail, the full local list with each entry's chosen
+    /// visibility — the editor renders these; `Session::profile_view`
+    /// fills them from [`ProfileLocal`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub employment: Vec<LocalEmployment>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub education: Vec<LocalEducation>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub certifications: Vec<LocalCertification>,
     /// The tags currently published, in the order they were signed.
     pub tags: Vec<String>,
     /// Canonical tag -> self-assessed level string. A tag absent here has
@@ -59,10 +286,21 @@ pub struct ProfileView {
 }
 
 impl ProfileView {
-    /// Fold a held [`ProfileSkillTags`] into the shell shape.
+    /// Fold a held [`ProfileSkillTags`] into the shell shape. `headline` /
+    /// `bio` are left `None` — the signed event carries only the `Public`
+    /// copy, and `Session::profile_view` fills them from the local
+    /// [`ProfileLocal`] which also knows each field's chosen visibility.
     fn from_record(p: ProfileSkillTags) -> Self {
         Self {
             display_name: p.display_name,
+            name: None,
+            alt_name: None,
+            headline: None,
+            bio: None,
+            location: None,
+            employment: vec![],
+            education: vec![],
+            certifications: vec![],
             tags: p.skill_tags,
             levels: p
                 .skill_levels
@@ -98,14 +336,58 @@ pub struct LinkEdit {
     pub url: String,
 }
 
+/// What the editor sends for `display_name`. Accepts the legacy bare
+/// string (`"vk"` -> public) as well as the `{ value, visibility }` shape
+/// every other free-text field uses, so an older caller is unaffected.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum NameEdit {
+    Plain(String),
+    Field(ProfileFieldEdit),
+}
+
+impl From<&NameEdit> for ProfileField {
+    fn from(n: &NameEdit) -> Self {
+        match n {
+            NameEdit::Plain(s) => ProfileField {
+                value: s.trim().to_string(),
+                visibility: FieldVisibility::Public,
+            },
+            NameEdit::Field(f) => ProfileField::from(f),
+        }
+    }
+}
+
 /// What the editor collected. An entry that will not resolve is an error
 /// naming it, not a silent drop.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct ProfileEdit {
-    pub display_name: Option<String>,
+    /// The holder's name plus its visibility (or a bare string, legacy).
+    pub display_name: Option<NameEdit>,
+    /// An alternate public name plus its visibility.
+    #[serde(default)]
+    pub alt_name: Option<ProfileFieldEdit>,
     pub skills: Vec<SkillEdit>,
     #[serde(default)]
     pub links: Vec<LinkEdit>,
+    /// A one-line "what I do" plus its visibility. Omitted leaves the
+    /// stored value untouched; sent, it replaces it.
+    #[serde(default)]
+    pub headline: Option<ProfileFieldEdit>,
+    /// A short bio plus its visibility.
+    #[serde(default)]
+    pub bio: Option<ProfileFieldEdit>,
+    /// A coarse location plus its visibility.
+    #[serde(default)]
+    pub location: Option<ProfileFieldEdit>,
+    /// The full work-history list, each entry with its own visibility.
+    /// Omitted leaves the stored list; sent, it replaces it wholesale.
+    #[serde(default)]
+    pub employment: Option<Vec<LocalEmployment>>,
+    #[serde(default)]
+    pub education: Option<Vec<LocalEducation>>,
+    #[serde(default)]
+    pub certifications: Option<Vec<LocalCertification>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -123,6 +405,8 @@ pub enum ProfileError {
     Level { input: String },
     /// An external link did not validate.
     Link { input: String, reason: String },
+    /// `headline` or `bio` (the `Public` copy) is over its character bound.
+    Field { field: &'static str, reason: String },
 }
 
 impl std::fmt::Display for ProfileError {
@@ -138,6 +422,7 @@ impl std::fmt::Display for ProfileError {
                 "`{input}` is not a level (beginner, intermediate, senior, expert)"
             ),
             ProfileError::Link { input, reason } => write!(f, "link `{input}`: {reason}"),
+            ProfileError::Field { field, reason } => write!(f, "{field}: {reason}"),
         }
     }
 }
@@ -274,23 +559,109 @@ pub fn build_signed(
         });
     }
 
-    let display_name = edit
-        .display_name
+    // The name and its alias, like every other free-text field: published
+    // only if the holder left the visibility `Public`.
+    let display_name = name_published(
+        edit.display_name.as_ref().map(ProfileField::from),
+        "display_name",
+    )?;
+    let alt_name = name_published(
+        edit.alt_name.as_ref().map(ProfileField::from),
+        "alt_name",
+    )?;
+
+    // Free-text prose + structured lists: only the `Public` copy of a
+    // field, and only `Public` entries, reach the event. `Contacts` and
+    // `Private` are held locally by the caller.
+    let headline = field_published(edit.headline.as_ref(), "headline", MAX_HEADLINE_LEN)?;
+    let bio = field_published(edit.bio.as_ref(), "bio", MAX_BIO_LEN)?;
+    let location = field_published(edit.location.as_ref(), "location", MAX_LOCATION_LEN)?;
+
+    let employment = edit
+        .employment
         .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(str::to_string);
+        .map(|v| v.iter().filter_map(LocalEmployment::published).collect())
+        .unwrap_or_default();
+    let education = edit
+        .education
+        .as_deref()
+        .map(|v| v.iter().filter_map(LocalEducation::published).collect())
+        .unwrap_or_default();
+    let certifications = edit
+        .certifications
+        .as_deref()
+        .map(|v| v.iter().filter_map(LocalCertification::published).collect())
+        .unwrap_or_default();
 
     let profile = ProfileSkillTags {
         display_name,
+        alt_name,
+        headline,
+        bio,
+        location,
+        employment,
+        education,
+        certifications,
         skill_tags,
         skill_levels,
         skill_sources,
         links,
     };
+    // The protocol owns the entry bounds (count + per-field length).
+    profile.validate().map_err(|e| match e {
+        qw_protocol::events::ProfileSkillTagsError::FieldLength { field, .. } => {
+            ProfileError::Field {
+                field,
+                reason: e.to_string(),
+            }
+        }
+        other => ProfileError::Field {
+            field: "profile",
+            reason: other.to_string(),
+        },
+    })?;
+
     let pubkey = identity.nostr_pubkey_hex();
     let revision = latest_revision(events, &pubkey) + 1;
     Ok(profile_skill_tags(&pubkey, revision, &profile).sign(identity))
+}
+
+/// Same as [`field_published`] for a name — the value is already a
+/// resolved [`ProfileField`] (a `NameEdit` may have been a bare string).
+fn name_published(
+    f: Option<ProfileField>,
+    name: &'static str,
+) -> Result<Option<String>, ProfileError> {
+    let Some(v) = f.and_then(|f| f.published()) else {
+        return Ok(None);
+    };
+    if v.chars().count() >= MAX_NAME_LEN {
+        return Err(ProfileError::Field {
+            field: name,
+            reason: format!("must be shorter than {MAX_NAME_LEN} characters"),
+        });
+    }
+    Ok(Some(v))
+}
+
+/// The `Public`, non-empty, in-bounds value of an optional editor field —
+/// what [`build_signed`] mirrors into the signed profile. `Contacts` /
+/// `Private` / empty / absent all yield `None`.
+fn field_published(
+    e: Option<&ProfileFieldEdit>,
+    name: &'static str,
+    max: usize,
+) -> Result<Option<String>, ProfileError> {
+    let Some(v) = e.and_then(|e| ProfileField::from(e).published()) else {
+        return Ok(None);
+    };
+    if v.chars().count() >= max {
+        return Err(ProfileError::Field {
+            field: name,
+            reason: format!("must be shorter than {max} characters"),
+        });
+    }
+    Ok(Some(v))
 }
 
 #[cfg(test)]
@@ -305,7 +676,7 @@ mod tests {
     /// A `ProfileEdit` with bare tags, no levels/links — the common case.
     fn edit_of(name: Option<&str>, tags: &[&str]) -> ProfileEdit {
         ProfileEdit {
-            display_name: name.map(str::to_string),
+            display_name: name.map(|n| NameEdit::Plain(n.to_string())),
             skills: tags
                 .iter()
                 .map(|t| SkillEdit {
@@ -315,6 +686,7 @@ mod tests {
                 })
                 .collect(),
             links: vec![],
+            ..Default::default()
         }
     }
 
@@ -405,6 +777,7 @@ mod tests {
                     url: "https://github.com/vk".into(),
                 }, // dup url
             ],
+            ..Default::default()
         };
         let ev = build_signed(&me, &[], &edit).unwrap();
         let p: ProfileSkillTags = serde_json::from_str(&ev.content).unwrap();
@@ -484,6 +857,51 @@ mod tests {
                 ProfileError::TooMany(MAX_TAGS + 1)
             );
         }
+    }
+
+    #[test]
+    fn headline_public_is_published_trimmed_private_bio_is_not() {
+        let mut edit = edit_of(Some("vk"), &["it/backend/languages#rust"]);
+        edit.headline = Some(ProfileFieldEdit {
+            value: "  Backend engineer  ".into(),
+            visibility: "public".into(),
+        });
+        edit.bio = Some(ProfileFieldEdit {
+            value: "a note to self".into(),
+            visibility: "private".into(),
+        });
+        let ev = build_signed(&id(), &[], &edit).unwrap();
+        let p: ProfileSkillTags = serde_json::from_str(&ev.content).unwrap();
+        assert_eq!(p.headline.as_deref(), Some("Backend engineer"));
+        assert_eq!(p.bio, None, "a Private field never reaches the signed event");
+
+        // Contacts behaves as Private until the encrypted channel is built.
+        edit.headline = Some(ProfileFieldEdit {
+            value: "hidden".into(),
+            visibility: "contacts".into(),
+        });
+        let ev = build_signed(&id(), &[], &edit).unwrap();
+        let p: ProfileSkillTags = serde_json::from_str(&ev.content).unwrap();
+        assert_eq!(p.headline, None);
+    }
+
+    #[test]
+    fn a_public_headline_at_the_protocol_bound_is_rejected() {
+        let mut edit = edit_of(None, &["it/backend/languages#rust"]);
+        edit.headline = Some(ProfileFieldEdit {
+            value: "x".repeat(qw_protocol::events::MAX_HEADLINE_LEN),
+            visibility: "public".into(),
+        });
+        assert!(matches!(
+            build_signed(&id(), &[], &edit),
+            Err(ProfileError::Field { field: "headline", .. })
+        ));
+        // one under the bound is fine
+        edit.headline = Some(ProfileFieldEdit {
+            value: "x".repeat(qw_protocol::events::MAX_HEADLINE_LEN - 1),
+            visibility: "public".into(),
+        });
+        assert!(build_signed(&id(), &[], &edit).is_ok());
     }
 
     #[test]

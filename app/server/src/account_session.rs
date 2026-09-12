@@ -467,6 +467,7 @@ mod tests {
             admission: Default::default(),
             propagation: Default::default(),
             client_prefs: Default::default(),
+            profile_local: Default::default(),
         };
         o.history.persist_sync_state(&st).unwrap();
         assert!(o.history.dirty(), "a changed snapshot re-seals");

@@ -85,6 +85,11 @@ pub const KIND_RECOGNITION: u16 = 9093;
 // --- broadcast propagation (NIP-QW14) ---
 pub const KIND_BROADCAST: u16 = 9100;
 pub const KIND_HOP_RATING: u16 = 9101;
+/// Mailbox carrier for a broadcast: the immutable [`KIND_BROADCAST`]
+/// envelope is never rewritten, so the per-hop `["p", <next>]` routing,
+/// the hop-rating chain and the path travel in this wrapper instead
+/// (NIP-QW14 §5.6). Signed by whoever forwards it.
+pub const KIND_BROADCAST_CARRY: u16 = 9102;
 
 /// `Hours × Rate × ko × km` per abstract.md — `ko`/`km` may be omitted to
 /// simplify negotiation. For an AI-model party actor, `ko` tracks model
@@ -471,6 +476,37 @@ pub const MAX_SKILL_TAG_LEN: usize = 80;
 /// self-description, not a keyword dump (NIP-QW03).
 pub const MAX_PROFILE_SKILLS: usize = 80;
 
+/// A profile `display_name` / `alt_name` is shorter than this many
+/// Unicode characters (NIP-QW03).
+pub const MAX_NAME_LEN: usize = 80;
+
+/// A profile `headline` is shorter than this many Unicode characters — a
+/// one-line "what I do", not a paragraph (NIP-QW03).
+pub const MAX_HEADLINE_LEN: usize = 120;
+
+/// A profile `bio` is shorter than this many Unicode characters (NIP-QW03).
+pub const MAX_BIO_LEN: usize = 600;
+
+/// A profile `location` is shorter than this many Unicode characters — a
+/// place, not an address (NIP-QW03).
+pub const MAX_LOCATION_LEN: usize = 80;
+
+/// A short field on an `employment` / `education` / `certification` entry
+/// (title, org, school, dates, …) is shorter than this (NIP-QW03).
+pub const MAX_ENTRY_FIELD_LEN: usize = 160;
+
+/// An `employment.summary` is shorter than this (NIP-QW03).
+pub const MAX_ENTRY_SUMMARY_LEN: usize = 400;
+
+/// A profile carries fewer than this many `employment` entries (NIP-QW03).
+pub const MAX_EMPLOYMENT: usize = 20;
+
+/// …fewer than this many `education` entries (NIP-QW03).
+pub const MAX_EDUCATION: usize = 15;
+
+/// …fewer than this many `certifications` (NIP-QW03).
+pub const MAX_CERTIFICATIONS: usize = 30;
+
 /// Why a [`ProfileSkillTags`] is not well-formed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProfileSkillTagsError {
@@ -478,6 +514,14 @@ pub enum ProfileSkillTagsError {
     SkillTagLength(String),
     /// The profile carries `MAX_PROFILE_SKILLS` or more skill tags.
     TooManySkills(usize),
+    /// A free-text field (`headline` / `bio` / `location` / an entry
+    /// field) is at or over its bound.
+    FieldLength { field: &'static str, max: usize },
+    /// A structured list (`employment` / `education` / `certifications`)
+    /// carries `max` or more entries.
+    TooManyEntries { list: &'static str, max: usize },
+    /// A structured entry has no meaningful content (every field empty).
+    EmptyEntry { list: &'static str },
 }
 
 impl fmt::Display for ProfileSkillTagsError {
@@ -491,16 +535,96 @@ impl fmt::Display for ProfileSkillTagsError {
                 f,
                 "a profile carries fewer than {MAX_PROFILE_SKILLS} skill tags, got {n}"
             ),
+            ProfileSkillTagsError::FieldLength { field, max } => {
+                write!(f, "{field} must be shorter than {max} characters")
+            }
+            ProfileSkillTagsError::TooManyEntries { list, max } => {
+                write!(f, "a profile carries fewer than {max} {list} entries")
+            }
+            ProfileSkillTagsError::EmptyEntry { list } => {
+                write!(f, "an empty {list} entry")
+            }
         }
     }
 }
 
 impl std::error::Error for ProfileSkillTagsError {}
 
+/// One job in the holder's work history. Free-text throughout — dates are
+/// whatever the holder typed (`2019`, `2019-03`, `Mar 2019`); an empty
+/// `end` reads as "current". Public: only entries the holder marked
+/// public are put here (see `app/profile-fields.md`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Employment {
+    pub title: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub org: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub start: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub end: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub summary: String,
+}
+
+/// One line of the holder's education history.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Education {
+    pub school: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub field: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub start: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub end: String,
+}
+
+/// One certification the holder claims. `url` is an optional link to a
+/// verification page — unverified by the protocol, like [`ExternalLink`].
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Certification {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub issuer: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub year: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub url: String,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ProfileSkillTags {
+    /// The holder's name. Optional; present here only if the holder set
+    /// it to `public` (a client MAY keep it local — see
+    /// `app/profile-fields.md`). `< MAX_NAME_LEN` characters.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub display_name: Option<String>,
+    /// An alternate public name — an alias to show instead of / alongside
+    /// `display_name`. Additive, optional, `< MAX_NAME_LEN` characters.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alt_name: Option<String>,
+    /// A one-line "what I do", shown above the skills. Additive (a
+    /// pre-2026-09 profile has none); `< MAX_HEADLINE_LEN` characters.
+    /// Public, like everything else in this event.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub headline: Option<String>,
+    /// A short free-text bio. Additive; `< MAX_BIO_LEN` characters. Public.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bio: Option<String>,
+    /// Where the holder is, coarsely — "Berlin, DE". Additive; `<
+    /// MAX_LOCATION_LEN` characters. Public.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub location: Option<String>,
+    /// Work history — only the entries the holder marked public. Additive;
+    /// fewer than `MAX_EMPLOYMENT`, each field bounded.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub employment: Vec<Employment>,
+    /// Education history, same rules. Fewer than `MAX_EDUCATION`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub education: Vec<Education>,
+    /// Certifications, same rules. Fewer than `MAX_CERTIFICATIONS`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub certifications: Vec<Certification>,
     /// Leaf tags from `taxonomy.yaml`, e.g. `it/backend/languages#rust`, or
     /// a custom label. Each `< MAX_SKILL_TAG_LEN` characters and fewer than
     /// `MAX_PROFILE_SKILLS` of them — see [`ProfileSkillTags::validate`].
@@ -533,8 +657,102 @@ impl ProfileSkillTags {
                 return Err(ProfileSkillTagsError::SkillTagLength(tag.clone()));
             }
         }
+        for (v, field) in [
+            (&self.display_name, "display_name"),
+            (&self.alt_name, "alt_name"),
+        ] {
+            if v.as_deref().is_some_and(|s| s.chars().count() >= MAX_NAME_LEN) {
+                return Err(ProfileSkillTagsError::FieldLength {
+                    field,
+                    max: MAX_NAME_LEN,
+                });
+            }
+        }
+        if self.headline.as_deref().is_some_and(|h| h.chars().count() >= MAX_HEADLINE_LEN) {
+            return Err(ProfileSkillTagsError::FieldLength {
+                field: "headline",
+                max: MAX_HEADLINE_LEN,
+            });
+        }
+        if self.bio.as_deref().is_some_and(|b| b.chars().count() >= MAX_BIO_LEN) {
+            return Err(ProfileSkillTagsError::FieldLength {
+                field: "bio",
+                max: MAX_BIO_LEN,
+            });
+        }
+        if self.location.as_deref().is_some_and(|l| l.chars().count() >= MAX_LOCATION_LEN) {
+            return Err(ProfileSkillTagsError::FieldLength {
+                field: "location",
+                max: MAX_LOCATION_LEN,
+            });
+        }
+
+        check_len("employment", &self.employment, MAX_EMPLOYMENT, |e| {
+            [
+                (&e.title, "employment.title"),
+                (&e.org, "employment.org"),
+                (&e.start, "employment.start"),
+                (&e.end, "employment.end"),
+            ]
+            .into_iter()
+            .try_for_each(|(v, name)| bound(v, name, MAX_ENTRY_FIELD_LEN))?;
+            bound(&e.summary, "employment.summary", MAX_ENTRY_SUMMARY_LEN)?;
+            if e.title.trim().is_empty() && e.org.trim().is_empty() {
+                return Err(ProfileSkillTagsError::EmptyEntry { list: "employment" });
+            }
+            Ok(())
+        })?;
+        check_len("education", &self.education, MAX_EDUCATION, |e| {
+            [
+                (&e.school, "education.school"),
+                (&e.field, "education.field"),
+                (&e.start, "education.start"),
+                (&e.end, "education.end"),
+            ]
+            .into_iter()
+            .try_for_each(|(v, name)| bound(v, name, MAX_ENTRY_FIELD_LEN))?;
+            if e.school.trim().is_empty() {
+                return Err(ProfileSkillTagsError::EmptyEntry { list: "education" });
+            }
+            Ok(())
+        })?;
+        check_len("certifications", &self.certifications, MAX_CERTIFICATIONS, |c| {
+            [
+                (&c.name, "certification.name"),
+                (&c.issuer, "certification.issuer"),
+                (&c.year, "certification.year"),
+                (&c.url, "certification.url"),
+            ]
+            .into_iter()
+            .try_for_each(|(v, name)| bound(v, name, MAX_ENTRY_FIELD_LEN))?;
+            if c.name.trim().is_empty() {
+                return Err(ProfileSkillTagsError::EmptyEntry {
+                    list: "certifications",
+                });
+            }
+            Ok(())
+        })?;
         Ok(())
     }
+}
+
+fn bound(v: &str, field: &'static str, max: usize) -> Result<(), ProfileSkillTagsError> {
+    if v.chars().count() >= max {
+        return Err(ProfileSkillTagsError::FieldLength { field, max });
+    }
+    Ok(())
+}
+
+fn check_len<T>(
+    list: &'static str,
+    entries: &[T],
+    max: usize,
+    mut each: impl FnMut(&T) -> Result<(), ProfileSkillTagsError>,
+) -> Result<(), ProfileSkillTagsError> {
+    if entries.len() >= max {
+        return Err(ProfileSkillTagsError::TooManyEntries { list, max });
+    }
+    entries.iter().try_for_each(&mut each)
 }
 
 /// Build a profile event ([`KIND_PROFILE`], replaceable). `revision` is
@@ -1163,6 +1381,35 @@ pub fn broadcast(
         KIND_BROADCAST,
         tags,
         serde_json::to_string(envelope).expect("Broadcast serializes"),
+    )
+}
+
+/// The mailbox-carried form of one broadcast hop (NIP-QW14 §5.6): the
+/// originator's immutable envelope, the kind-9101 ratings gathered so far
+/// (plus the sender's own), and the origin-first path. The recipient
+/// verifies each inner event independently before trusting it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BroadcastCarry {
+    pub envelope: Event,
+    #[serde(default)]
+    pub ratings: Vec<Event>,
+    #[serde(default)]
+    pub path: Vec<String>,
+}
+
+/// `["p", <recipient>]` for mailbox routing; content is the
+/// [`BroadcastCarry`]. `sender_pubkey_hex` is the forwarding node (the
+/// originator at hop 1).
+pub fn broadcast_carry(
+    sender_pubkey_hex: &str,
+    to_pubkey_hex: &str,
+    carry: &BroadcastCarry,
+) -> UnsignedEvent {
+    UnsignedEvent::new(
+        sender_pubkey_hex,
+        KIND_BROADCAST_CARRY,
+        vec![p_tag(to_pubkey_hex)],
+        serde_json::to_string(carry).expect("BroadcastCarry serializes"),
     )
 }
 
@@ -1950,6 +2197,79 @@ mod tests {
     }
 
     #[test]
+    fn profile_structured_entry_limits() {
+        let base = ProfileSkillTags {
+            skill_tags: vec!["it/backend/languages#rust".to_string()],
+            ..Default::default()
+        };
+
+        // A well-formed entry set validates.
+        let ok = ProfileSkillTags {
+            employment: vec![Employment {
+                title: "Engineer".into(),
+                org: "Acme".into(),
+                start: "2019".into(),
+                ..Default::default()
+            }],
+            education: vec![Education {
+                school: "State U".into(),
+                ..Default::default()
+            }],
+            certifications: vec![Certification {
+                name: "CKA".into(),
+                issuer: "CNCF".into(),
+                ..Default::default()
+            }],
+            ..base.clone()
+        };
+        assert!(ok.validate().is_ok());
+
+        // An over-long entry field.
+        let long_title = ProfileSkillTags {
+            employment: vec![Employment {
+                title: "x".repeat(MAX_ENTRY_FIELD_LEN),
+                ..Default::default()
+            }],
+            ..base.clone()
+        };
+        assert!(matches!(
+            long_title.validate(),
+            Err(ProfileSkillTagsError::FieldLength {
+                field: "employment.title",
+                ..
+            })
+        ));
+
+        // Too many certifications.
+        let too_many = ProfileSkillTags {
+            certifications: (0..MAX_CERTIFICATIONS)
+                .map(|i| Certification {
+                    name: format!("c{i}"),
+                    ..Default::default()
+                })
+                .collect(),
+            ..base.clone()
+        };
+        assert_eq!(
+            too_many.validate(),
+            Err(ProfileSkillTagsError::TooManyEntries {
+                list: "certifications",
+                max: MAX_CERTIFICATIONS,
+            })
+        );
+
+        // A wholly empty employment entry.
+        let empty = ProfileSkillTags {
+            employment: vec![Employment::default()],
+            ..base
+        };
+        assert_eq!(
+            empty.validate(),
+            Err(ProfileSkillTagsError::EmptyEntry { list: "employment" })
+        );
+    }
+
+    #[test]
     fn revision_defaults_to_zero_when_the_tag_is_absent_or_junk() {
         let me = Identity::generate();
         // No revision tag at all (a legacy 9020, or any other kind).
@@ -2022,6 +2342,41 @@ mod tests {
         assert_eq!(decoded, rating);
         assert!(decoded.is_valid_at(1_736_500_000));
         assert!(!decoded.is_valid_at(1_736_660_000));
+    }
+
+    #[test]
+    fn broadcast_carry_routes_to_the_recipient_and_round_trips() {
+        let sender = crate::identity::Identity::generate();
+        let to = crate::identity::Identity::generate();
+        let originator = crate::identity::Identity::generate();
+
+        let envelope = broadcast(
+            &originator.nostr_pubkey_hex(),
+            &Broadcast {
+                kind: BroadcastKind::Proposal,
+                body: serde_json::json!({ "skill_tags": ["it/backend/languages#rust"], "note": "open" }),
+                expires_at: 9_999_999_999,
+            },
+            &["it/backend/languages#rust".to_string()],
+        )
+        .sign(&originator);
+
+        let carry = BroadcastCarry {
+            envelope: envelope.clone(),
+            ratings: vec![],
+            path: vec![originator.nostr_pubkey_hex()],
+        };
+        let event =
+            broadcast_carry(&sender.nostr_pubkey_hex(), &to.nostr_pubkey_hex(), &carry).sign(&sender);
+
+        assert_eq!(event.kind, KIND_BROADCAST_CARRY);
+        assert_eq!(event.first_tag_value("p"), Some(to.nostr_pubkey_hex().as_str()));
+        assert!(event.verify().is_ok());
+
+        let decoded: BroadcastCarry = serde_json::from_str(&event.content).unwrap();
+        assert_eq!(decoded, carry);
+        assert!(decoded.envelope.verify().is_ok());
+        assert_eq!(decoded.envelope.kind, KIND_BROADCAST);
     }
 
     #[test]

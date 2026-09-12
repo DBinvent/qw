@@ -1,6 +1,6 @@
 // Client for the updates-and-news mailing list (`user_mgmt::subscribe_router`).
 //
-// Generated file — the source of truth is ../../user_mgmt/web/lib/news-client.ts.
+// Generated file - the source of truth is ../../user_mgmt/web/lib/news-client.ts.
 // Edit it there and re-run `user_mgmt/web/sync.sh <this-app>`; a local edit
 // will be overwritten.
 //
@@ -10,7 +10,7 @@
 
 const BASE = process.env.NEXT_PUBLIC_NEWS_API ?? '/api/news'
 
-/** Mirrors `AccountError` — same shape, so a page can handle either. */
+/** Mirrors `AccountError` - same shape, so a page can handle either. */
 export class NewsError extends Error {
   status: number
   constructor(status: number, message: string) {
@@ -38,7 +38,7 @@ async function post<T>(path: string, payload: unknown): Promise<T> {
   try {
     body = text ? JSON.parse(text) : null
   } catch {
-    // Non-JSON from a proxy or an error page — fall through to the
+    // Non-JSON from a proxy or an error page - fall through to the
     // status-based message rather than showing the caller raw HTML.
   }
 
@@ -56,7 +56,7 @@ async function post<T>(path: string, payload: unknown): Promise<T> {
 
 export const news = {
   /**
-   * Answers identically whether or not the address is already on the list —
+   * Answers identically whether or not the address is already on the list - 
    * so must the UI, or the page becomes the account-existence oracle the API
    * refuses to be. Always show "check your email".
    */

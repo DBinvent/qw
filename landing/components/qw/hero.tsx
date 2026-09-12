@@ -18,11 +18,16 @@ export function Hero() {
         </h1>
         <p className="mx-auto mt-5 max-w-xl text-pretty leading-relaxed text-muted-foreground">
           Found through friends of friends. A peer-verified contribution network: time
-          contributed to shared projects, signed by the counterparties who received it — no
+          contributed to shared projects, signed by the counterparties who received it - no
           blockchain, no tokens-as-currency, no central authority.
         </p>
+        <p className="mx-auto mt-4 max-w-xl text-pretty leading-relaxed text-muted-foreground">
+          Post a demand - what you need - or a proposal - what you offer. The network
+          pairs demands with proposals across your contacts and hands you a shortlist,
+          ranked by preferences you define on your own device.
+        </p>
 
-{/* Web UI first because it costs a click, not an install — it is the
+{/* Web UI first because it costs a click, not an install - it is the
             fastest way to see what QW does. The glow moves to it for that
             reason; Android keeps the filled style right beside it (same size,
             adjacent) because it is the client that actually holds your key,
@@ -32,14 +37,14 @@ export function Hero() {
             href={WEB_UI_URL}
             target="_blank"
             rel="noopener noreferrer"
-            className="glow-violet inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-primary px-5 text-sm font-medium text-primary-foreground transition-transform hover:-translate-y-px"
+            className="glow-accent inline-flex h-11 items-center justify-center gap-2 rounded-lg btn-accent px-5 text-sm transition-transform hover:-translate-y-px"
           >
             <Globe className="size-4" />
             Open the web UI
           </a>
           <a
             href={ANDROID_APK_URL}
-            className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-primary px-5 text-sm font-medium text-primary-foreground transition-transform hover:-translate-y-px"
+            className="inline-flex h-11 items-center justify-center gap-2 rounded-lg btn-accent px-5 text-sm transition-transform hover:-translate-y-px"
           >
             <Download className="size-4" />
             Download for Android
@@ -65,14 +70,14 @@ export function Hero() {
         {/* One line, because a front-page button that says nothing about
             what it opens is how people end up surprised. The web UI is a
             hosted try-it: the key it makes lives in server memory while you
-            are signed in, not on your device — fine for a look, not for
+            are signed in, not on your device - fine for a look, not for
             anything you need to keep. The app is where the key is yours. */}
         <p className="mx-auto mt-4 max-w-2xl font-mono text-[11px] leading-relaxed text-muted-foreground">
           A time book and time bank for open-source work · <AndroidFacts /> ·{' '}
           <a href="/join" className="text-primary hover:text-primary/80">
             sideload, not a store build
           </a>{' '}
-          · the web UI keeps your key on the server — a preview, not the
+          · the web UI keeps your key on the server - a preview, not the
           client you trust with real work
         </p>
       </div>

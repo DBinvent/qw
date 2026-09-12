@@ -4,27 +4,31 @@ import { FAQ_DOC_URL } from '@/lib/links'
 const faqs = [
   {
     q: 'Is Quant a cryptocurrency?',
-    a: 'No. A Quant is a unit of measure — 1 Quant = a quarter hour of work at minimum qualification, analogous to a meter or an hour. It denominates the value of work on a contract but has no ledger of its own; what you hold is your counterparties’ signed records, not a balance or a tradeable token.',
+    a: 'No. A Quant is a unit of measure - 1 Quant = a quarter hour of work at minimum qualification, analogous to a meter or an hour. It denominates the value of work on a contract but has no ledger of its own; what you hold is your counterparties’ signed records, not a balance or a tradeable token.',
   },
   {
     q: 'Do I need a blockchain to use this?',
-    a: 'No. Global ordering is unnecessary — bilateral signatures already make omission provable by production. Consensus is unnecessary — the design accepts detection over prevention. And token transfer is unnecessary, since the unit is time, not a tradeable asset.',
+    a: 'No. Global ordering is unnecessary - bilateral signatures already make omission provable by production. Consensus is unnecessary - the design accepts detection over prevention. And token transfer is unnecessary, since the unit is time, not a tradeable asset.',
   },
   {
     q: 'Who computes my reputation?',
-    a: 'You do, locally, from the public graph of signed contribution records — with your own weights and tolerances. There is no global credit score; there are as many subjective readings of the same public record as there are participants.',
+    a: 'You do, locally, from the public graph of signed contribution records - with your own weights and tolerances. There is no global credit score; there are as many subjective readings of the same public record as there are participants.',
+  },
+  {
+    q: 'How do I find someone to work with?',
+    a: 'You post a demand - what you need - or a proposal - what you offer; a demand is matched by someone’s proposal, a proposal by someone’s demand. The query propagates a few hops through your web of trust and each client answers for the people it knows. What comes back is a shortlist, deduped and ranked by the weights and filters you set on your own device; no server decides who you see.',
   },
   {
     q: 'What stops fake accounts or bot farms?',
-    a: 'Trust flows down a signed chain, and a block propagates up it. Every account is signed into the web of trust by someone, so behind any bot farm sits a small number of real signing accounts — find and block those, and the whole farm falls with them. Detection is social, not algorithmic.',
+    a: 'Trust flows down a signed chain, and a block propagates up it. Every account is signed into the web of trust by someone, so behind any bot farm sits a small number of real signing accounts - find and block those, and the whole farm falls with them. Detection is social, not algorithmic.',
   },
   {
     q: 'Does exchanging work through this count as taxable barter?',
-    a: 'The structural defense only holds when work is on a declared open-source project and no project involved is controlled by the counterparty in a way that privatizes the benefit — the same shape as ordinary open-source co-authorship. Direct bilateral work-for-work, or contribution to a counterparty-controlled private project, falls outside that framing and is the participants’ own responsibility to assess. This has not been confirmed by a written tax attorney opinion — treat it as an engineering description of the system, not legal advice.',
+    a: 'The structural defense only holds when work is on a declared open-source project and no project involved is controlled by the counterparty in a way that privatizes the benefit - the same shape as ordinary open-source co-authorship. Direct bilateral work-for-work, or contribution to a counterparty-controlled private project, falls outside that framing and is the participants’ own responsibility to assess. This has not been confirmed by a written tax attorney opinion - treat it as an engineering description of the system, not legal advice.',
   },
   {
     q: 'Can I delete something I published?',
-    a: 'Deletion here is advisory only. A relay may honor a deletion request, but nothing requires it to, and any relay, contact, or archive that already copied a record may keep it indefinitely. If your jurisdiction grants a legal right to deletion (e.g. GDPR), publishing through this protocol may not by itself satisfy it — don’t publish anything you may later be legally required to delete.',
+    a: 'Deletion here is advisory only. A relay may honor a deletion request, but nothing requires it to, and any relay, contact, or archive that already copied a record may keep it indefinitely. If your jurisdiction grants a legal right to deletion (e.g. GDPR), publishing through this protocol may not by itself satisfy it - don’t publish anything you may later be legally required to delete.',
   },
   {
     q: 'What’s the technical stack?',

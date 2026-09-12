@@ -10,7 +10,7 @@ import { ANDROID_MANIFEST_URL, androidFileUrl, type AndroidRelease } from '@/lib
 // Why it is a hook and not a constant: publishing a build should not require
 // deploying the site. The release host writes a manifest and repoints a
 // `-latest` symlink; anything here that named a version would go stale the
-// moment a build shipped, and — worse — a page that prints a checksum it is
+// moment a build shipped, and - worse - a page that prints a checksum it is
 // no longer serving is actively misleading on the one page that tells people
 // to verify what they downloaded.
 //
@@ -71,7 +71,7 @@ export function AndroidFacts() {
 /**
  * The download block on /join: the button, the facts, and the checksum.
  *
- * The button is a plain link rendered immediately — it does not wait for the
+ * The button is a plain link rendered immediately - it does not wait for the
  * manifest and does not break if the manifest never arrives, because a
  * download page whose download depends on a second request is a download
  * page that is sometimes broken.
@@ -96,7 +96,7 @@ export function AndroidDownload({ href }: { href: string }) {
       <div className="mt-5 flex flex-wrap items-center gap-x-4 gap-y-3">
         <a
           href={target}
-          className="glow-violet inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-primary px-5 text-sm font-medium text-primary-foreground transition-transform hover:-translate-y-px"
+          className="glow-accent inline-flex h-11 items-center justify-center gap-2 rounded-lg btn-accent px-5 text-sm transition-transform hover:-translate-y-px"
         >
           <Download className="size-4" />
           Download the APK
@@ -108,7 +108,7 @@ export function AndroidDownload({ href }: { href: string }) {
       </div>
       <p className="mt-4 text-sm leading-relaxed text-muted-foreground">
         Android will ask you to allow installs from whatever app opened it; that prompt is what
-        sideloading is. Check what you got before you tap it —{' '}
+        sideloading is. Check what you got before you tap it - {' '}
         <code className="font-mono text-xs text-foreground">sha256sum</code> on the file must
         print:
       </p>

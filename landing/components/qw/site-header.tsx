@@ -35,7 +35,7 @@ export function SiteHeader() {
             href={SOURCE_URL}
             target="_blank"
             rel="noopener noreferrer"
-            className="glow-violet hidden rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-transform hover:-translate-y-px sm:inline-flex"
+            className="glow-accent hidden rounded-lg btn-accent px-4 py-2 text-sm transition-transform hover:-translate-y-px sm:inline-flex"
           >
             {SOURCE_LABEL}
           </a>
@@ -70,7 +70,7 @@ export function SiteHeader() {
             target="_blank"
             rel="noopener noreferrer"
             onClick={() => setOpen(false)}
-            className="mt-1 rounded-lg bg-primary px-4 py-2 text-center text-sm font-medium text-primary-foreground"
+            className="mt-1 rounded-lg btn-accent px-4 py-2 text-center text-sm"
           >
             {SOURCE_LABEL}
           </a>

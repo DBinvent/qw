@@ -10,7 +10,7 @@ import QRCode from 'qrcode'
 // decision instead of the library's.
 //
 // Mirrors qw_client_core::invite_qr_svg, which does the same job inside the
-// app. Two implementations because the two sides share no runtime — but
+// app. Two implementations because the two sides share no runtime - but
 // they encode the same string, the full https://knownby.work/i/<npub> URL,
 // so a code from either scans to the same place.
 
@@ -60,7 +60,7 @@ export function InviteQr({ value, className }: { value: string; className?: stri
           So the plate is painted here rather than inherited. */}
       <rect width={span} height={span} fill="#ffffff" />
       <g transform={`translate(${QUIET} ${QUIET})`}>
-        <path d={d} fill="#0f0d1a" />
+        <path d={d} fill="#0a1a10" />
       </g>
     </svg>
   )

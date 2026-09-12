@@ -1,6 +1,7 @@
 # NIP-QW14: Broadcast propagation
 
-`draft` — kinds `9100` (broadcast envelope), `9101` (hop rating)
+`draft` — kinds `9100` (broadcast envelope), `9101` (hop rating),
+`9102` (mailbox carrier)
 
 ## Abstract
 
@@ -199,6 +200,17 @@ only ever tightens or loosens per type.
    day against `rate_per_day`; a contact over budget is skipped this
    window, not dropped.
 
+### Kind 9102 — the mailbox carrier
+
+`E` (9100) is immutable, so it cannot carry a per-recipient `["p"]` tag
+and the mailbox routes on `["p"]`. Each "send" in step 6 (and the
+originator's first fan-out) is therefore a **kind `9102`** event, signed
+by the forwarding node, `["p", <recipient>]`, content
+`{ "envelope": <E>, "ratings": [<9101>…], "path": [<pubkey>…] }`. The
+recipient verifies the inner `envelope` and each `rating` independently
+before feeding them to step 1. The carrier is disposable — a node stores
+`E`, not the 9102 that brought it.
+
 ## 6. Where this meets the rest
 
 - **NIP-QW06** — greedy fan-out selection (`qw_node::routing`) is reused
@@ -222,7 +234,7 @@ only ever tightens or loosens per type.
 
 | aspect | today | this spec |
 |---|---|---|
-| multi-hop push | none — NIP-QW06 pushes queries, NIP-QW11 is one hosted board | kind 9100 envelope, echomail fan-out |
+| multi-hop push | **built for the `demand` type**, surfaced in the client as an "open to work" post — `Session::originate_broadcast` signs a 9100 (body `{skill_tags, note, hours, period}`; empty `skill_tags` routes on the whole profile), fans out 9102 carriers, `sync_now` relays inbound ones through `Node::receive_broadcast`. `proposal` (hiring side) / `profile` / `news` / `review` origination still unwired | kind 9100 envelope, echomail fan-out, all five types |
 | per-hop score | a relay re-signs a NIP-QW06 hop but attaches no score | kind 9101, signed, cached per `(originator, domain)` for `hop_rating_ttl` days |
 | forward gate | `ContactPolicy` depth / categories / rate; **no score floor** | `min_hop_score` per type, folded chain score |
 | per-type config | one `ContactPolicy` for all query traffic | one `PropagationPolicy` per message type, defaults tabled in §4 |

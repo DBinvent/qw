@@ -24,20 +24,20 @@ import {
 import { AndroidDownload, AndroidVersion } from '@/components/qw/android-release'
 
 // The detail behind the "How to join" card on the home page. The card states
-// the property (open, no gate); this page is the instruction — what a person
+// the property (open, no gate); this page is the instruction - what a person
 // installs, what the app does on first launch, and which of it exists today.
 //
 // Rule for editing this page: every status claim below has to be true of the
 // repo at `main`, not of the plan. As of 2026-08-26 the Android build has
 // been installed and run on a device, so the "never launched" hedging that
-// stood here is gone — but what replaced it is not enthusiasm, it is the
+// stood here is gone - but what replaced it is not enthusiasm, it is the
 // next set of true limits: one architecture, sideload rather than a store,
 // no iOS or desktop package, and invite links that still have to be pasted
 // rather than opening the app. A download that states its own limits keeps
 // the rest of the page trustworthy; one that oversells does not.
 
 export const metadata: Metadata = {
-  title: 'How to join — QW',
+  title: 'How to join - QW',
   description:
     'A time book and a time bank for open-source work, on your phone. It records the hours you contributed and who countersigned them, and denominates what you are owed in the same unit. No signup, no gate, no waiting list.',
 }
@@ -47,9 +47,9 @@ const steps = [
     icon: Smartphone,
     n: '01',
     title: 'Get the app: your time book',
-    lead: 'A time book is the record — what you worked on, for how long, countersigned by whoever received it. QW keeps yours on your phone, because the phone holds the key that signs it.',
+    lead: 'A time book is the record - what you worked on, for how long, countersigned by whoever received it. QW keeps yours on your phone, because the phone holds the key that signs it.',
     body: [
-      'It is a time bank in the same breath. Hours flow both ways in open source — you review someone\u2019s patch this month, they maintain the library you depend on next — and the same signed records that document what you gave denominate what you are owed, in Quant, a quarter hour of work. No balance sits on a server; what you hold is your counterparties\u2019 signatures.',
+      'It is a time bank in the same breath. Hours flow both ways in open source - you review someone\u2019s patch this month, they maintain the library you depend on next - and the same signed records that document what you gave denominate what you are owed, in Quant, a quarter hour of work. No balance sits on a server; what you hold is your counterparties\u2019 signatures.',
       'One codebase (Rust + Tauri v2) targets Android, iOS and desktop. The phone is the primary shape because a signing device is something you carry, and because a thin client that syncs when it next wakes is the only realistic model when the counterparty is asleep half the time.',
       'The client runs no relay and no DHT. It signs what you tell it to, hands the result to whatever server or relay it can reach, and collects what arrived for you. That is the whole job.',
     ],
@@ -58,7 +58,7 @@ const steps = [
     icon: KeyRound,
     n: '02',
     title: 'First launch generates your identity',
-    lead: 'One secp256k1 keypair, made on the device. That is the account — there is no email, no password and no server that could issue you one.',
+    lead: 'One secp256k1 keypair, made on the device. That is the account - there is no email, no password and no server that could issue you one.',
     body: [
       'The same key is both a did:key controller id and a Nostr pubkey, so the identity that signs your contracts is the identity that publishes your events.',
       'It is stored in the app data directory, private to the app, file mode 0600. Back it up. Nobody can reissue it: losing the key is losing every record signed with it, and a client that quietly generated a fresh one instead of reporting a corrupt key file would look like being logged out while abandoning your history. So it reports.',
@@ -67,11 +67,11 @@ const steps = [
   {
     icon: Link2,
     n: '03',
-    title: 'Open an invite link — or post your own',
+    title: 'Open an invite link - or post your own',
     lead: 'Following knownby.work/i/<npub> exchanges two signed introductions and puts you one hop from the publisher.',
     body: [
-      'An invite link is just a public key in a URL, so it works anywhere a URL works — a LinkedIn profile, a talk slide, an email signature, a README badge. Whoever publishes it has consented in advance to the introduction, so your client signs your half and the publisher’s client answers with theirs.',
-      'You do not need one to join. A self-introduction to someone you found through a referral query, or a mutual introduction carried by a shared contact, are the other two shapes of the same event. There is no admission step behind any of them — a signed introduction is the membership.',
+      'An invite link is just a public key in a URL, so it works anywhere a URL works - a LinkedIn profile, a talk slide, an email signature, a README badge. Whoever publishes it has consented in advance to the introduction, so your client signs your half and the publisher’s client answers with theirs.',
+      'You do not need one to join. A self-introduction to someone you found through a referral query, or a mutual introduction carried by a shared contact, are the other two shapes of the same event. There is no admission step behind any of them - a signed introduction is the membership.',
     ],
   },
   {
@@ -80,7 +80,7 @@ const steps = [
     title: 'Say what you do, then do some of it',
     lead: 'Skill tags are the claim; completed, countersigned contracts are the evidence.',
     body: [
-      'Publishing a tag costs nothing and proves nothing, by design. Trust is computed from finished work — a hop-1 contact with no contracts counts exactly as much as a stranger four hops out: nothing.',
+      'Publishing a tag costs nothing and proves nothing, by design. Trust is computed from finished work - a hop-1 contact with no contracts counts exactly as much as a stranger four hops out: nothing.',
       'That is also why an invite link cannot be used to inflate anyone. The link edge makes you reachable, so queries can route to you and offers can arrive. It vouches for no one, and a link you posted publicly is marked as such so it never lends your vouchers to a cascade block.',
     ],
   },
@@ -99,7 +99,7 @@ const platforms = [
     state: 'postponed',
     tone: 'todo' as const,
     detail:
-      'Nothing iOS-specific stands in the way — it needs macOS, Xcode and a paid Apple account, none of which this project has. Deliberately parked until Android is on a store rather than kept as a soon: shipping a second platform before the first one is properly distributed is how both end up half-done.',
+      'Nothing iOS-specific stands in the way - it needs macOS, Xcode and a paid Apple account, none of which this project has. Deliberately parked until Android is on a store rather than kept as a soon: shipping a second platform before the first one is properly distributed is how both end up half-done.',
   },
   {
     name: 'Desktop',
@@ -113,7 +113,7 @@ const platforms = [
     state: 'hosted preview',
     tone: 'progress' as const,
     detail:
-      'The same shell in a browser, at qw.knownby.work — profile, introductions, the job lifecycle, referral queries, trust reads and dispute annotations all work. What differs is key custody: it registers you with a passphrase and holds the signing key in server memory while you are signed in, rather than on your device. Good for a look; export your seed and move to the app for anything you need to keep. Delegated signing to an external signer (qw-signer: URIs) is still the planned endgame.',
+      'The same shell in a browser, at qw.knownby.work - profile, introductions, the job lifecycle, referral queries, trust reads and dispute annotations all work. What differs is key custody: it registers you with a passphrase and holds the signing key in server memory while you are signed in, rather than on your device. Good for a look; export your seed and move to the app for anything you need to keep. Delegated signing to an external signer (qw-signer: URIs) is still the planned endgame.',
   },
 ]
 
@@ -122,13 +122,13 @@ const built = [
     done: true,
     what: 'Protocol layer',
     detail:
-      'Identity, the job lifecycle, trust paths, cascade block, referral routing, introductions and invite links — 134 tests pass across the workspace.',
+      'Identity, the job lifecycle, trust paths, cascade block, referral routing, introductions and invite links - 134 tests pass across the workspace.',
   },
   {
     done: true,
     what: 'Client core',
     detail:
-      'On-disk identity, the HTTP mailbox transport, and the invite-link flow — tested against a real server on a real socket.',
+      'On-disk identity, the HTTP mailbox transport, and the invite-link flow - tested against a real server on a real socket.',
   },
   {
     done: true,
@@ -140,13 +140,13 @@ const built = [
     done: false,
     what: 'A released app',
     detail:
-      'Android runs: a signed APK, sideloaded from this page, one architecture, on no store. That is a working build rather than a release — nothing is packaged for iOS or desktop, and nothing has been through a store review.',
+      'Android runs: a signed APK, sideloaded from this page, one architecture, on no store. That is a working build rather than a release - nothing is packaged for iOS or desktop, and nothing has been through a store review.',
   },
   {
     done: false,
     what: 'Relays and deep links',
     detail:
-      'No public relay or gateway runs yet, and clicking an invite link does not open the app — the link has to be pasted into it.',
+      'No public relay or gateway runs yet, and clicking an invite link does not open the app - the link has to be pasted into it.',
   },
 ]
 
@@ -182,11 +182,11 @@ export default function JoinPage() {
                 omission. The caveats sit next to the button, not below it. */}
             <div className="mt-8 rounded-xl border border-primary/40 bg-card p-5">
               <p className="font-mono text-xs uppercase tracking-widest text-primary">
-                Android — <AndroidVersion />signed, running
+                Android - <AndroidVersion />signed, running
               </p>
               <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
                 Your time book and your time bank, on the device that already goes everywhere with
-                you. It runs on Android — installed, launched and exercised on real hardware, which is a
+                you. It runs on Android - installed, launched and exercised on real hardware, which is a
                 sentence this page could not honestly print until 2026-08-26. It still installs by
                 sideload rather than from Play, it is built for arm64 only, and iOS and desktop have
                 no package at all.
@@ -200,13 +200,13 @@ export default function JoinPage() {
             </div>
 
             {/* The web UI is the no-install path, so it belongs on the join
-                page too — but its caveat is louder than Android's (someone
+                page too - but its caveat is louder than Android's (someone
                 else's server holds the key), so it gets its own card and its
                 own colour rather than sitting under the APK button. */}
             <div className="mt-4 rounded-xl border border-danger/40 bg-card p-5">
               <p className="flex items-center gap-2 font-mono text-xs uppercase tracking-widest text-danger">
                 <Globe className="size-4" />
-                Web UI — hosted preview
+                Web UI - hosted preview
               </p>
               <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
                 <a
@@ -218,7 +218,7 @@ export default function JoinPage() {
                   qw.knownby.work
                 </a>{' '}
                 runs the same shell in a browser with nothing to install. It registers you with a
-                passphrase and keeps the signing key in server memory for the length of your session —
+                passphrase and keeps the signing key in server memory for the length of your session - 
                 not on your device, and readable by whoever runs the host. Use it to see how QW works;
                 the moment a record matters, export your seed from the Keys panel and open it in the
                 app, where the key never leaves your hardware.
@@ -354,7 +354,7 @@ export default function JoinPage() {
               </h2>
             </div>
             <p className="mt-4 leading-relaxed text-muted-foreground">
-              Rust stable, no services, no network. These run locally and publish nothing anywhere — there
+              Rust stable, no services, no network. These run locally and publish nothing anywhere - there
               is no relay and no public gateway yet, so this is a developer path rather than a way onto a
               running network.
             </p>
@@ -416,7 +416,7 @@ cargo tauri android init && cargo tauri android dev`}</code>
               </div>
               <p className="mt-4 text-sm leading-relaxed text-muted-foreground">
                 The signup box at the bottom of this page is the only list QW keeps, and it is a mailing
-                list, not a queue — being on it grants nothing and skips nothing, because there is nothing
+                list, not a queue - being on it grants nothing and skips nothing, because there is nothing
                 to skip. Double opt-in, one click to leave.
               </p>
               <div className="mt-6 flex flex-wrap gap-3">
@@ -424,7 +424,7 @@ cargo tauri android init && cargo tauri android dev`}</code>
                   href={GITHUB_URL}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="glow-violet inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-primary px-5 text-sm font-medium text-primary-foreground transition-transform hover:-translate-y-px"
+                  className="glow-accent inline-flex h-11 items-center justify-center gap-2 rounded-lg btn-accent px-5 text-sm transition-transform hover:-translate-y-px"
                 >
                   View source
                   <ArrowUpRight className="size-4" />

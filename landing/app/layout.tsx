@@ -15,12 +15,12 @@ const jetbrainsMono = JetBrains_Mono({
 })
 
 export const metadata: Metadata = {
-  title: 'QW — knownby.work',
+  title: 'QW - knownby.work',
   description:
-    'Skills confirmed by the people you worked with and for. Found through friends of friends. A peer-verified contribution network — no blockchain, no tokens, no central authority.',
+    'Skills confirmed by the people you worked with and for. Found through friends of friends. A peer-verified contribution network - no blockchain, no tokens, no central authority.',
   metadataBase: new URL('https://knownby.work'),
   openGraph: {
-    title: 'QW — knownby.work',
+    title: 'QW - knownby.work',
     description: 'Skills confirmed by the people you worked with and for. Found through friends of friends.',
     url: 'https://knownby.work',
     siteName: 'QW',
@@ -30,7 +30,7 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   colorScheme: 'dark',
-  themeColor: '#09090b',
+  themeColor: '#04100a',
 }
 
 export default function RootLayout({

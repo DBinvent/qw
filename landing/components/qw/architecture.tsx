@@ -4,6 +4,7 @@ import {
   GitBranch,
   Inbox,
   KeyRound,
+  ListChecks,
   type LucideIcon,
   Network,
   ScrollText,
@@ -24,15 +25,21 @@ type Point = {
 
 const points: Point[] = [
   {
+    icon: ListChecks,
+    title: 'Post a need, get a shortlist',
+    desc: 'A demand says what you need; a proposal says what you offer. Post either one, and the network walks your contact graph to pair it with the opposite kind, then returns a ranked shortlist - ordered by the weights and filters you set on your own device, never on a server.',
+    tag: 'Matched on your device',
+  },
+  {
     icon: Clock,
     title: 'Quant: a unit, not a currency',
-    desc: '1 Quant = a quarter hour of work at minimum qualification. It denominates value on a contract but has no ledger of its own — what you hold is your counterparties’ signed records, not a balance.',
+    desc: '1 Quant = a quarter hour of work at minimum qualification. It denominates value on a contract but has no ledger of its own - what you hold is your counterparties’ signed records, not a balance.',
     tag: 'Time-denominated',
   },
   {
     icon: Network,
     title: 'Web of trust, from completed work',
-    desc: 'Reputation isn’t a separate score — it emerges from the job lifecycle itself. Trust is domain-specific and computed locally by each participant, with no global credit score.',
+    desc: 'Reputation isn’t a separate score - it emerges from the job lifecycle itself. Trust is domain-specific and computed locally by each participant, with no global credit score.',
     tag: 'Local & subjective',
   },
   {
@@ -44,31 +51,31 @@ const points: Point[] = [
   {
     icon: ScrollText,
     title: 'Signed records, no consensus',
-    desc: 'Contribution records are Verifiable Credentials, dual-indexed under both parties’ keys and checked against a publication window — omission is detectable within hours, not assumed absent.',
+    desc: 'Contribution records are Verifiable Credentials, dual-indexed under both parties’ keys and checked against a publication window - omission is detectable within hours, not assumed absent.',
     tag: 'W3C VC',
   },
   {
     icon: GitBranch,
     title: 'Sybil resistance via cascade block',
-    desc: 'Trust flows down a signed chain; a block propagates up it. Behind any bot farm sits a limited number of real signing accounts — find and block those, and the farm falls with them.',
+    desc: 'Trust flows down a signed chain; a block propagates up it. Behind any bot farm sits a limited number of real signing accounts - find and block those, and the farm falls with them.',
     tag: 'Social, not algorithmic',
   },
   {
     icon: Inbox,
     title: 'Neither side has to be online',
-    desc: 'No step of a contract needs the counterparty — or a network — reachable at the moment you take it; each one is composed and signed from what you already hold. Relays carry the signed records on to the other side whenever their client next wakes.',
+    desc: 'No step of a contract needs the counterparty - or a network - reachable at the moment you take it; each one is composed and signed from what you already hold. Relays carry the signed records on to the other side whenever their client next wakes.',
     tag: 'Store and forward',
   },
   {
     icon: KeyRound,
     title: 'did:key / did:web + Nostr',
-    desc: 'Identity is a keypair, not an account with a provider. Storage and transport run over Nostr relays; a client is a thin signing device — the same model Signal uses for messages.',
+    desc: 'Identity is a keypair, not an account with a provider. Storage and transport run over Nostr relays; a client is a thin signing device - the same model Signal uses for messages.',
     tag: 'No central server',
   },
   {
     icon: UserPlus,
     title: 'How to join',
-    desc: 'No gate and no waiting list — install the app, let it generate a keypair, and you are in. Your invite link works anywhere you can post a URL, and someone who follows it arrives as a first-degree contact instead of a stranger several hops away.',
+    desc: 'No gate and no waiting list - install the app, let it generate a keypair, and you are in. Your invite link works anywhere you can post a URL, and someone who follows it arrives as a first-degree contact instead of a stranger several hops away.',
     tag: 'Open, not invite-only',
     // The only card with a href: the others state a property, this one is an
     // instruction, and "you are in" invites the obvious follow-up question of
@@ -89,8 +96,8 @@ export function Architecture() {
             A contribution graph, not a ledger
           </h2>
           <p className="mt-4 text-pretty leading-relaxed text-muted-foreground">
-            Every contract runs the same lifecycle — <span className="text-foreground">Job Request → Acceptance →
-            Milestones → Completion → Multi-party Sign</span> — and each signed contract is itself a trust
+            Every contract runs the same lifecycle - <span className="text-foreground">Job Request → Acceptance →
+            Milestones → Completion → Multi-party Sign</span> - and each signed contract is itself a trust
             relationship. If Alice and Bob completed a job, Alice trusts Bob in that domain; Carol can walk the
             chain from Alice to evaluate Bob without a central authority computing anything on her behalf.
           </p>
@@ -129,8 +136,8 @@ export function Architecture() {
         </div>
 
         <p className="mt-8 text-sm leading-relaxed text-muted-foreground">
-          Full design rationale — platform selection, mobile architecture, data model, privacy, and legal framing
-          — lives in{' '}
+          Full design rationale - platform selection, mobile architecture, data model, privacy, and legal framing
+ - lives in{' '}
           <a
             href={ABSTRACT_URL}
             target="_blank"

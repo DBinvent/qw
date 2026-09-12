@@ -27,6 +27,7 @@ external handle too).
 ```json
 {
   "display_name": "vk",
+  "alt_name": "v. krinitsyn",
   "skill_tags": [
     "it/backend/languages#rust",
     "it/backend/frameworks#axum"
@@ -38,6 +39,18 @@ external handle too).
   "skill_sources": {
     "it/backend/languages#rust": "commit-analysis"
   },
+  "headline": "Backend engineer · Rust / axum",
+  "bio": "Ten years on payment systems; now mostly protocol work.",
+  "location": "Berlin, DE",
+  "employment": [
+    { "title": "Staff Engineer", "org": "Acme", "start": "2021", "summary": "payments platform" }
+  ],
+  "education": [
+    { "school": "State U", "field": "CS", "start": "2011", "end": "2015" }
+  ],
+  "certifications": [
+    { "name": "CKA", "issuer": "CNCF", "year": "2022" }
+  ],
   "links": [
     { "network": "github", "url": "https://github.com/vk" },
     { "network": "linkedin", "url": "https://www.linkedin.com/in/vk" }
@@ -45,7 +58,11 @@ external handle too).
 }
 ```
 
-`display_name` is optional. `skill_tags` are taxonomy leaves
+`display_name` and `alt_name` are optional (`< MAX_NAME_LEN` = 80
+characters each). `display_name` is present here only if the holder set
+its visibility to `public` — a client MAY keep it local and publish only
+`alt_name`, an alias (see `app/profile-fields.md`). `skill_tags` are
+taxonomy leaves
 (`/taxonomy.yaml`, format `sector/domain[/area]#skill`, max 5 per the
 taxonomy's own rule) — normalize free-text input through `/synonyms.yaml`
 **before** signing this event; tag fragmentation ("nodejs" vs "node.js")
@@ -67,6 +84,34 @@ additive** — an event that omits them is valid, and an older client that
 does not know them parses the rest unchanged. Keys of `skill_levels` and
 `skill_sources` MUST be members of `skill_tags`; a reader drops any that
 are not.
+
+**`headline`, `bio`, `location`** — optional free-text, additive.
+`headline` is a one-line "what I do" (`< MAX_HEADLINE_LEN` = 120 Unicode
+characters); `bio` a short paragraph (`< MAX_BIO_LEN` = 600); `location`
+a coarse place, "Berlin, DE" not a street address (`< MAX_LOCATION_LEN` =
+80).
+
+**`employment`, `education`, `certifications`** — optional structured
+lists, additive. Each entry is a small object of free-text fields (dates
+are whatever the holder typed; an empty `employment.end` reads as
+"current"):
+
+| list | fields | bound |
+|---|---|---|
+| `employment` | `title` (required), `org`, `start`, `end`, `summary` | `< MAX_EMPLOYMENT` = 20 entries |
+| `education` | `school` (required), `field`, `start`, `end` | `< MAX_EDUCATION` = 15 |
+| `certifications` | `name` (required), `issuer`, `year`, `url` | `< MAX_CERTIFICATIONS` = 30 |
+
+Each short field is `< MAX_ENTRY_FIELD_LEN` = 160 characters,
+`employment.summary` `< MAX_ENTRY_SUMMARY_LEN` = 400. An entry with its
+required field empty is rejected, not dropped silently.
+
+`ProfileSkillTags::validate` enforces every bound above; a reader SHOULD
+reject an event that fails it rather than truncate. Like the rest of this
+event, all of these are **public**. A client MAY hold a fuller profile
+locally with a **per-field and per-entry visibility** and publish only
+what the holder marked public — see `app/profile-fields.md` for that
+model and the contacts-only tier (encrypted, unspecced) it points at.
 
 ## Level, provenance and external links
 

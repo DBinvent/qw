@@ -132,6 +132,8 @@ fn router(web: Arc<Web>) -> Router {
         .route("/api/contacts", post(contacts))
         .route("/api/find_by_skill", post(find_by_skill))
         .route("/api/referral_results", post(referral_results))
+        .route("/api/originate_broadcast", post(originate_broadcast))
+        .route("/api/broadcasts", post(broadcasts))
         .route("/api/profile_of", post(profile_of))
         .route("/api/trust", post(trust))
         .route("/api/net_position", post(net_position))
@@ -194,8 +196,15 @@ async fn ledger_push(State(web): State<Arc<Web>>, Json(events): Json<Vec<Event>>
 
 /// The one static asset — the same file Tauri loads, which picks
 /// HTTP-fetch over the Tauri IPC bridge when `window.__TAURI__` is absent.
-async fn index() -> Html<&'static str> {
-    Html(include_str!("../../ui/index.html"))
+async fn index() -> Response {
+    // The whole UI is this one file, baked into the binary. A short cache
+    // (5 min) so a redeploy shows up on its own within the window without
+    // a hard refresh — mobile browsers in particular ignore one.
+    (
+        [("cache-control", "public, max-age=300")],
+        Html(include_str!("../../ui/index.html")),
+    )
+        .into_response()
 }
 
 /// Mirrors the multi-user host's `/session` so the shared UI has one probe
@@ -330,6 +339,39 @@ struct FindBySkillBody {
 }
 async fn find_by_skill(State(web): State<Arc<Web>>, Json(b): Json<FindBySkillBody>) -> Response {
     reply(on_session(web, move |s| s.find_by_skill(&b.skill).map_err(text)).await)
+}
+
+#[derive(Deserialize)]
+struct OriginateBroadcastBody {
+    /// Skills to emphasise; empty = the whole published profile.
+    #[serde(default)]
+    preferred: Vec<String>,
+    #[serde(default)]
+    note: String,
+    #[serde(default)]
+    hours: Option<u32>,
+    #[serde(default)]
+    period: Option<String>,
+    #[serde(default = "default_ttl_days")]
+    ttl_days: u64,
+}
+fn default_ttl_days() -> u64 {
+    7
+}
+async fn originate_broadcast(
+    State(web): State<Arc<Web>>,
+    Json(b): Json<OriginateBroadcastBody>,
+) -> Response {
+    reply(
+        on_session(web, move |s| {
+            s.originate_broadcast(&b.preferred, &b.note, b.hours, b.period.as_deref(), b.ttl_days)
+                .map_err(text)
+        })
+        .await,
+    )
+}
+async fn broadcasts(State(web): State<Arc<Web>>) -> Response {
+    reply(on_session(web, |s| Ok::<_, String>(s.broadcasts())).await)
 }
 
 #[derive(Deserialize)]
