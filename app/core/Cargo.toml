@@ -17,7 +17,7 @@ serde_json = "1.0.151"
 # startup — see src/taxonomy.rs. serde_yaml is archived upstream but is a
 # frozen, correct parser and these inputs are static; not worth a fork.
 serde_yaml = "0.9"
-qrcode = { version = "0.14.1", default-features = false, features = ["svg"] }
+qrcode = { version = "0.15.0", default-features = false, features = ["svg"] }
 
 [dev-dependencies]
 axum = "0.7"
