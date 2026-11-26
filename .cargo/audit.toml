@@ -1,0 +1,10 @@
+# cargo audit's settings for qw (.github/workflows/audit.yml, and `cargo audit` here).
+[advisories]
+# RUSTSEC-2023-0071, rsa 0.9 (the Marvin attack: a timing side channel on RSA private-key
+# operations), and RUSTSEC-2026-0459, libsqlite3-sys 0.30 (the C SQLite it bundles): ignored
+# (2026-11-26) because neither is built. sqlx names its MySQL and SQLite drivers in every lock
+# file, whatever features are on - rsa comes with the MySQL one, libsqlite3-sys with the SQLite
+# one - and qw's server takes the postgres driver only (`cargo tree -i rsa --target all -e all`
+# and `cargo tree -i libsqlite3-sys --target all -e all`: nothing). Drop an entry once a
+# workspace crate builds that crate, or once sqlx's lock entries move to fixed versions.
+ignore = ["RUSTSEC-2023-0071", "RUSTSEC-2026-0459"]

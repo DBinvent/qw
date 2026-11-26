@@ -1,5 +1,7 @@
 /doc-link/
 .c*
+# cargo's settings (cargo audit's) are kept
+!/.cargo/
 /target/
 # CocoIndex Code (ccc)
 /.cocoindex_code/
