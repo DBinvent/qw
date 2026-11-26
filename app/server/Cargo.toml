@@ -29,7 +29,7 @@ argon2 = "0.5"
 chacha20poly1305 = "0.10"
 blake2 = "0.10"                              # keyed-hash nickname blind index
 hex = "0.4"
-rand = "0.8"
+rand = "0.10"
 uuid = { version = "1", features = ["v4"] }
 zeroize = { version = "1", features = ["derive"] }
 unicode-normalization = "0.1"               # NFC the nickname before hashing
