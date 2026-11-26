@@ -23,7 +23,10 @@ export function QwLogo({ className }: { className?: string }) {
           />
         </svg>
       </span>
-      <span className="text-[17px] font-semibold tracking-tight text-foreground">QW</span>
+      {/* Wordmark in the accent too, not the body ink: the mark beside it is
+          already green, and a pale-mint "QW" next to it read as two colours
+          rather than one logo. */}
+      <span className="text-[17px] font-semibold tracking-tight text-primary">QW</span>
     </div>
   )
 }

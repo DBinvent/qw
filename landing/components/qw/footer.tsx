@@ -7,7 +7,7 @@ export function Footer() {
     <footer className="relative border-t border-border">
       <div className="mx-auto max-w-5xl px-4 py-12 sm:px-6">
         {/*
-          Generated from ../../../../user_mgmt/web - the same signup box the
+          Generated from ../../../../signon/web - the same signup box the
           dash sites use, posting to /api/news/subscribe, which src/worker.ts
           forwards to qw-server. Double opt-in: nothing is sent to the address
           until the confirmation link is clicked.

@@ -34,7 +34,8 @@ use uuid::Uuid;
 
 use crate::account_session::{self, OpenAccount, SealedHandle};
 use crate::accounts::{self, AccountError, AccountRecord, AccountStore, PgAccountStore, SERVER_KEY_LEN};
-use crate::envelope::{MasterKey, Wrapping};
+use crate::envelope::{unix_secs, MasterKey, Wrapping};
+use crate::mail;
 use crate::ratelimit::RateLimiter;
 use crate::unlock::{self, UnlockError};
 
@@ -60,6 +61,20 @@ const LOGIN_WINDOW: Duration = Duration::from_secs(5 * 60);
 /// Sweep interval for stale rate-limit windows — at least the longest limit
 /// window above, so an in-progress window is never swept out from under it.
 const RATE_LIMIT_SWEEP_MAX_AGE: Duration = REGISTER_WINDOW;
+
+/// `/api/set_email` and `/api/email_resend` — self-service, but each call
+/// sends mail to an address the account holder typed, so capped against
+/// using this as a spam relay or hammering one real inbox with resends.
+const EMAIL_SEND_LIMIT: u32 = 5;
+const EMAIL_SEND_WINDOW: Duration = Duration::from_secs(60 * 60);
+/// `/api/email_verify` — a 6-digit code is a space of one million; this
+/// cap plus the 24-hour expiry (and a fresh code replacing the old one on
+/// every resend) keeps a guess-everything attack impractical without a
+/// separate persisted attempt counter.
+const EMAIL_VERIFY_LIMIT: u32 = 10;
+const EMAIL_VERIFY_WINDOW: Duration = Duration::from_secs(10 * 60);
+/// How long a sent code is good for.
+const EMAIL_CODE_TTL_SECS: u64 = 24 * 60 * 60;
 
 /// True when this process should run the multi-user host.
 pub fn configured() -> bool {
@@ -103,7 +118,12 @@ pub async fn serve() {
         }
     }
 
-    let web = Arc::new(MuWeb::new(Arc::new(store), load_server_key(), servers));
+    let web = Arc::new(MuWeb::new(
+        Arc::new(store),
+        load_server_key(),
+        servers,
+        mail::Mailer::from_env(),
+    ));
     MuWeb::spawn_sweeper(web.clone());
 
     let addr = std::env::var("QW_WEB_ADDR").unwrap_or_else(|_| "127.0.0.1:8788".into());
@@ -142,6 +162,7 @@ pub struct MuWeb {
     servers: Vec<String>,
     live: Mutex<HashMap<String, Arc<Mutex<Live>>>>,
     limiter: RateLimiter,
+    mailer: mail::Mailer,
 }
 
 struct Live {
@@ -167,6 +188,7 @@ impl MuWeb {
         store: Arc<dyn AccountStore>,
         server_key: [u8; SERVER_KEY_LEN],
         servers: Vec<String>,
+        mailer: mail::Mailer,
     ) -> Self {
         Self {
             store,
@@ -174,6 +196,7 @@ impl MuWeb {
             servers,
             live: Mutex::new(HashMap::new()),
             limiter: RateLimiter::new(),
+            mailer,
         }
     }
 
@@ -306,7 +329,7 @@ impl MuWeb {
 // --- routing ---------------------------------------------------------
 
 pub fn router(web: Arc<MuWeb>) -> Router {
-    Router::new()
+    let app = Router::new()
         .route("/", get(index))
         .route("/auth/register", post(register))
         .route("/auth/login", post(login))
@@ -347,8 +370,15 @@ pub fn router(web: Arc<MuWeb>) -> Router {
         .route("/api/kek_flag", post(kek_flag))
         .route("/api/kek_recovery", post(kek_recovery))
         .route("/api/seed_export", post(seed_export))
+        .route("/api/email", post(email_get))
+        .route("/api/set_email", post(set_email))
+        .route("/api/email_verify", post(email_verify))
+        .route("/api/email_resend", post(email_resend))
+        .route("/api/email_drop", post(email_drop))
         .route("/servers", get(host_servers_get).post(host_servers_set))
-        .with_state(web)
+        .with_state(web);
+    // [dot-dot] a path holding `..` is refused before any route
+    crate::dot_dot::guarded(app)
 }
 
 /// The public host-default coordination-server list — the "bootstrap"
@@ -1057,6 +1087,213 @@ async fn seed_export(State(web): State<Arc<MuWeb>>, headers: HeaderMap) -> Respo
         .into_response()
 }
 
+// --- optional email (notify only, never a login or reset path) -------
+//
+// Account-store level, same tier as the KEK routes above and unlike them
+// not keyed to the session master at all — the email cipher is sealed
+// under `server_key`, exactly like the nickname. So these resolve the
+// live session only for its `account_id`, then act on `web.store`
+// directly, the same shape `kek_list` already uses.
+
+/// The shape every one of these five routes answers with.
+fn email_json(email: Option<&str>, verified: bool) -> Value {
+    json!({
+        "email": email,
+        "verified": verified,
+        // Pending: an address is on file but not yet confirmed. Absent
+        // entirely (`email: null`) is a different state from "pending" —
+        // the UI distinguishes "nothing added" from "check your inbox".
+        "pending": email.is_some() && !verified,
+    })
+}
+
+/// Current state: the address if one was ever added (decrypted — the
+/// holder typed it, so showing it back is not new exposure), whether it
+/// is confirmed, and whether a code is outstanding.
+async fn email_get(State(web): State<Arc<MuWeb>>, headers: HeaderMap) -> Response {
+    let Some(account_id) = live_account_id(&web, &headers) else {
+        return ApiError::Unauthorized.into_response();
+    };
+    match web.store.by_account_id(account_id).await {
+        Ok(Some(rec)) => match rec.email(&web.server_key) {
+            Ok(email) => (
+                StatusCode::OK,
+                Json(email_json(
+                    email.as_deref(),
+                    rec.email_verified_at.is_some(),
+                )),
+            )
+                .into_response(),
+            Err(e) => ApiError::internal(e).into_response(),
+        },
+        Ok(None) => ApiError::Unauthorized.into_response(),
+        Err(e) => ApiError::internal(e).into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+struct SetEmailBody {
+    email: String,
+}
+
+/// Add an address, or replace the one on file — either way a fresh
+/// pending code goes out and any earlier verification is gone
+/// (`AccountStore::set_email`'s own invariant).
+async fn set_email(
+    State(web): State<Arc<MuWeb>>,
+    headers: HeaderMap,
+    Json(b): Json<SetEmailBody>,
+) -> Response {
+    let Some(account_id) = live_account_id(&web, &headers) else {
+        return ApiError::Unauthorized.into_response();
+    };
+    let email = match accounts::normalize_email(&b.email) {
+        Ok(e) => e,
+        Err(e) => return ApiError::bad(e).into_response(),
+    };
+    if let Err(r) = web.limiter.check(
+        &format!("email-send:{account_id}"),
+        EMAIL_SEND_LIMIT,
+        EMAIL_SEND_WINDOW,
+    ) {
+        return too_many_requests(r.retry_after_secs);
+    }
+    match send_email_code(&web, account_id, &email).await {
+        Ok(v) => (StatusCode::OK, Json(v)).into_response(),
+        Err(e) => e.into_response(),
+    }
+}
+
+/// Shared by `set_email` (first add / changed address) and `email_resend`
+/// (same address, fresh code): seal the address, mint a code, persist it
+/// — which always clears any earlier verification — and only then mail
+/// it, so a mail failure never leaves the account unable to find out a
+/// code already exists to resend.
+async fn send_email_code(web: &MuWeb, account_id: Uuid, email: &str) -> Result<Value, ApiError> {
+    let cipher = accounts::seal_email(&web.server_key, &account_id, email);
+    let code = accounts::generate_email_code();
+    let hash = accounts::blind_index(&web.server_key, &code);
+    web.store
+        .set_email(account_id, Some(cipher), Some(hash), Some(unix_secs()))
+        .await
+        .map_err(ApiError::internal)?;
+    web.mailer.send_code(email, &code).await;
+    Ok(email_json(Some(email), false))
+}
+
+/// Re-send the code for the address already on file — refuses if there is
+/// none, or if it is already confirmed (ask for a change instead, via
+/// `set_email`, which is the only path that accepts a new address).
+async fn email_resend(State(web): State<Arc<MuWeb>>, headers: HeaderMap) -> Response {
+    let Some(account_id) = live_account_id(&web, &headers) else {
+        return ApiError::Unauthorized.into_response();
+    };
+    if let Err(r) = web.limiter.check(
+        &format!("email-send:{account_id}"),
+        EMAIL_SEND_LIMIT,
+        EMAIL_SEND_WINDOW,
+    ) {
+        return too_many_requests(r.retry_after_secs);
+    }
+    let rec = match web.store.by_account_id(account_id).await {
+        Ok(Some(r)) => r,
+        Ok(None) => return ApiError::Unauthorized.into_response(),
+        Err(e) => return ApiError::internal(e).into_response(),
+    };
+    if rec.email_verified_at.is_some() {
+        return ApiError::BadRequest("already confirmed — nothing to resend".into())
+            .into_response();
+    }
+    let email = match rec.email(&web.server_key) {
+        Ok(Some(e)) => e,
+        Ok(None) => {
+            return ApiError::BadRequest("no email on this account yet — add one first".into())
+                .into_response()
+        }
+        Err(e) => return ApiError::internal(e).into_response(),
+    };
+    match send_email_code(&web, account_id, &email).await {
+        Ok(v) => (StatusCode::OK, Json(v)).into_response(),
+        Err(e) => e.into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+struct EmailVerifyBody {
+    code: String,
+}
+
+/// Confirm the pending code. Wrong code, no code pending, or an expired
+/// one are all a 400 naming which — never a hint at the real value, and
+/// never a path that reveals or changes the passphrase.
+async fn email_verify(
+    State(web): State<Arc<MuWeb>>,
+    headers: HeaderMap,
+    Json(b): Json<EmailVerifyBody>,
+) -> Response {
+    let Some(account_id) = live_account_id(&web, &headers) else {
+        return ApiError::Unauthorized.into_response();
+    };
+    if let Err(r) = web.limiter.check(
+        &format!("email-verify:{account_id}"),
+        EMAIL_VERIFY_LIMIT,
+        EMAIL_VERIFY_WINDOW,
+    ) {
+        return too_many_requests(r.retry_after_secs);
+    }
+    let rec = match web.store.by_account_id(account_id).await {
+        Ok(Some(r)) => r,
+        Ok(None) => return ApiError::Unauthorized.into_response(),
+        Err(e) => return ApiError::internal(e).into_response(),
+    };
+    let (Some(hash), Some(sent_at)) = (&rec.email_verify_hash, rec.email_verify_sent_at) else {
+        return ApiError::BadRequest("no code pending — ask for one first".into()).into_response();
+    };
+    if unix_secs().saturating_sub(sent_at) > EMAIL_CODE_TTL_SECS {
+        return ApiError::BadRequest("that code expired — ask for a new one".into())
+            .into_response();
+    }
+    let presented = accounts::blind_index(&web.server_key, b.code.trim());
+    if presented != *hash {
+        return ApiError::BadRequest("wrong code".into()).into_response();
+    }
+    let email = match rec.email(&web.server_key) {
+        Ok(e) => e,
+        Err(e) => return ApiError::internal(e).into_response(),
+    };
+    match web.store.mark_email_verified(account_id).await {
+        Ok(()) => (StatusCode::OK, Json(email_json(email.as_deref(), true))).into_response(),
+        Err(e) => ApiError::internal(e).into_response(),
+    }
+}
+
+/// Remove the address entirely — the "soft remove" this UI uses
+/// everywhere a protocol delete does not exist, except here the record
+/// genuinely is deleted: nothing else references it.
+async fn email_drop(State(web): State<Arc<MuWeb>>, headers: HeaderMap) -> Response {
+    let Some(account_id) = live_account_id(&web, &headers) else {
+        return ApiError::Unauthorized.into_response();
+    };
+    match web.store.set_email(account_id, None, None, None).await {
+        Ok(()) => (StatusCode::OK, Json(email_json(None, false))).into_response(),
+        Err(e) => ApiError::internal(e).into_response(),
+    }
+}
+
+/// Resolve the cookie to a live session and touch `last_seen`, same as
+/// every email route above needs and nothing more — no `Session`/master
+/// key required, just which account this is. `None` covers both "no
+/// cookie" and "expired", collapsed by every caller into `Unauthorized`.
+fn live_account_id(web: &MuWeb, headers: &HeaderMap) -> Option<Uuid> {
+    let live = web.resolve(headers)?;
+    let mut g = live.lock().unwrap();
+    if g.expired(Instant::now()) {
+        return None;
+    }
+    g.last_seen = Instant::now();
+    Some(g.account_id)
+}
+
 // --- session resolution + blob flush --------------------------------
 
 /// Resolve the session from the cookie, run `f` on the blocking pool under
@@ -1240,6 +1477,7 @@ mod tests {
             Arc::new(MemAccountStore::default()),
             [9u8; SERVER_KEY_LEN],
             vec![], // no coordination servers in the tests
+            mail::Mailer::disabled(),
         ))
     }
 
@@ -1317,7 +1555,12 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn a_write_persists_and_a_reopened_session_sees_it() {
         let store = Arc::new(MemAccountStore::default());
-        let web = Arc::new(MuWeb::new(store.clone(), [3u8; SERVER_KEY_LEN], vec![]));
+        let web = Arc::new(MuWeb::new(
+            store.clone(),
+            [3u8; SERVER_KEY_LEN],
+            vec![],
+            mail::Mailer::disabled(),
+        ));
         let app = router(web.clone());
 
         let (_, _, sc) = call(
@@ -1361,7 +1604,12 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn a_queued_event_survives_a_host_restart() {
         let store = Arc::new(MemAccountStore::default());
-        let web = Arc::new(MuWeb::new(store.clone(), [4u8; SERVER_KEY_LEN], vec![]));
+        let web = Arc::new(MuWeb::new(
+            store.clone(),
+            [4u8; SERVER_KEY_LEN],
+            vec![],
+            mail::Mailer::disabled(),
+        ));
         let app = router(web.clone());
 
         let (_, _, sc) = call(
@@ -1509,7 +1757,12 @@ mod tests {
         };
         accounts::migrate(&url).await.unwrap();
         let store = Arc::new(PgAccountStore::connect(&url).await.unwrap());
-        let web = Arc::new(MuWeb::new(store, [5u8; SERVER_KEY_LEN], vec![]));
+        let web = Arc::new(MuWeb::new(
+            store,
+            [5u8; SERVER_KEY_LEN],
+            vec![],
+            mail::Mailer::disabled(),
+        ));
         let app = router(web.clone());
 
         let nick = format!("pg.user.{}", Uuid::new_v4().simple());
@@ -1859,13 +2112,190 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn set_email_sends_a_code_and_verify_confirms_it() {
+        let app = router(web());
+        let (_, _, sc) = call(
+            &app,
+            "/auth/register",
+            None,
+            json!({ "nick": "iris.person", "secret": "a-decent-secret1" }),
+        )
+        .await;
+        let token = token_of(&sc.unwrap());
+
+        // nothing yet
+        let (st, got, _) = call(&app, "/api/email", Some(&token), json!({})).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(
+            got,
+            json!({ "email": null, "verified": false, "pending": false })
+        );
+
+        let addr = "iris@example.com";
+        let (st, got, _) = call(
+            &app,
+            "/api/set_email",
+            Some(&token),
+            json!({ "email": format!("  {} ", addr.to_uppercase()) }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "{got}");
+        assert_eq!(
+            got,
+            json!({ "email": addr, "verified": false, "pending": true })
+        );
+
+        // email_get agrees, and a bad code is refused without consuming it
+        let (_, got, _) = call(&app, "/api/email", Some(&token), json!({})).await;
+        assert_eq!(got["pending"], json!(true));
+        assert_eq!(
+            call(
+                &app,
+                "/api/email_verify",
+                Some(&token),
+                json!({ "code": "000000" })
+            )
+            .await
+            .0,
+            StatusCode::BAD_REQUEST
+        );
+
+        let code = mail::outbox::last_code_for(addr).expect("a code was sent");
+        let (st, got, _) = call(
+            &app,
+            "/api/email_verify",
+            Some(&token),
+            json!({ "code": code }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK, "{got}");
+        assert_eq!(
+            got,
+            json!({ "email": addr, "verified": true, "pending": false })
+        );
+
+        // re-asking for a code once confirmed is refused
+        assert_eq!(
+            call(&app, "/api/email_resend", Some(&token), json!({}))
+                .await
+                .0,
+            StatusCode::BAD_REQUEST
+        );
+
+        // dropping it clears everything
+        let (st, got, _) = call(&app, "/api/email_drop", Some(&token), json!({})).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(
+            got,
+            json!({ "email": null, "verified": false, "pending": false })
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn email_resend_replaces_the_pending_code() {
+        let app = router(web());
+        let (_, _, sc) = call(
+            &app,
+            "/auth/register",
+            None,
+            json!({ "nick": "jack.person", "secret": "another-secret-2" }),
+        )
+        .await;
+        let token = token_of(&sc.unwrap());
+
+        let addr = "jack@example.com";
+        call(
+            &app,
+            "/api/set_email",
+            Some(&token),
+            json!({ "email": addr }),
+        )
+        .await;
+        let first = mail::outbox::last_code_for(addr).unwrap();
+
+        let (st, _, _) = call(&app, "/api/email_resend", Some(&token), json!({})).await;
+        assert_eq!(st, StatusCode::OK);
+        let second = mail::outbox::last_code_for(addr).unwrap();
+        assert_ne!(first, second, "a resend mints a fresh code");
+
+        // the old code no longer verifies; the new one does
+        assert_eq!(
+            call(
+                &app,
+                "/api/email_verify",
+                Some(&token),
+                json!({ "code": first })
+            )
+            .await
+            .0,
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            call(
+                &app,
+                "/api/email_verify",
+                Some(&token),
+                json!({ "code": second })
+            )
+            .await
+            .0,
+            StatusCode::OK
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn email_routes_require_a_session_and_a_bad_address_is_a_400() {
+        let app = router(web());
+        // Well-formed bodies: a route whose JSON extractor rejects first
+        // (422) would never prove the auth check runs at all.
+        for (path, body) in [
+            ("/api/email", json!({})),
+            ("/api/set_email", json!({ "email": "nobody@example.com" })),
+            ("/api/email_verify", json!({ "code": "000000" })),
+            ("/api/email_resend", json!({})),
+            ("/api/email_drop", json!({})),
+        ] {
+            assert_eq!(
+                call(&app, path, None, body).await.0,
+                StatusCode::UNAUTHORIZED,
+                "{path}"
+            );
+        }
+
+        let (_, _, sc) = call(
+            &app,
+            "/auth/register",
+            None,
+            json!({ "nick": "lena.person", "secret": "yet-another-secr" }),
+        )
+        .await;
+        let token = token_of(&sc.unwrap());
+        assert_eq!(
+            call(
+                &app,
+                "/api/set_email",
+                Some(&token),
+                json!({ "email": "not an email" })
+            )
+            .await
+            .0,
+            StatusCode::BAD_REQUEST
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn public_servers_endpoint_reads_the_db_and_the_admin_post_is_gated() {
         let store = Arc::new(MemAccountStore::default());
         store
             .set_host_servers(&["https://relay.a".into(), "https://relay.b".into()])
             .await
             .unwrap();
-        let app = router(Arc::new(MuWeb::new(store, [8u8; SERVER_KEY_LEN], vec![])));
+        let app = router(Arc::new(MuWeb::new(
+            store,
+            [8u8; SERVER_KEY_LEN],
+            vec![],
+            mail::Mailer::disabled(),
+        )));
 
         // unauthenticated read of the host default
         let (st, body) = get(&app, "/servers", None).await;

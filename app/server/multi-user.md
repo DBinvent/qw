@@ -81,8 +81,36 @@ several.
   rate-limit bucketing, never for authorization. One process, in-memory;
   a multi-instance deployment would need a shared store, same caveat as
   the session table.
+- **Optional notify email — built 2026-10-07.** `src/accounts.rs` gained
+  `email_cipher` / `email_verified_at` / `email_verify_hash` /
+  `email_verify_sent_at` on `accounts`, all nullable — adding one is
+  always a later, self-service step, never part of `register`.
+  `seal_email` / `open_email` reuse the nickname's AEAD construction
+  (`seal_field`/`open_field`, parameterised by a domain tag so a cipher
+  cannot be swapped between the two columns), under the same
+  `server_key`; `normalize_email` is the same loose "anything like an
+  email" bar as the nickname's. The confirmation code is six digits
+  (`generate_email_code`, rejection-sampled) hashed with the same
+  `blind_index` the nickname already uses — nothing but a keyed hash of
+  the code is ever at rest. `AccountStore::set_email` always clears
+  `email_verified_at` (a fresh or changed address, including a resend, is
+  pending again); only `mark_email_verified` sets it, and only after the
+  handler has matched the presented code itself.
+  `src/multiuser.rs`: `POST /api/email` (state), `/api/set_email` (add or
+  replace — mints and mails a code), `/api/email_verify`, `/api/email_resend`,
+  `/api/email_drop`; each resolves the session to its `account_id` only
+  (`live_account_id`) and acts on `web.store` directly — no `Session`/master
+  key involved, same tier as the KEK routes. Rate-limited per account:
+  5 sends/hour, 10 verify attempts/10 min; a code expires in 24 h. `src/
+  mail.rs` is the sender: Cloudflare Email Sending's REST API only
+  (`CF_ACCOUNT_ID` + `CF_EMAIL_TOKEN` + `EMAIL_FROM`), **unconfigured is
+  not a startup failure** — unlike `../signon::Mailer::from_env`, this
+  host must keep working with no mailer at all (§8), so a host with none
+  set just logs the code instead of mailing it. UI: a "Notify email"
+  block on the Security page (`#email-section`, same multi-user-only
+  gating as the Keys section), add/resend/verify/remove.
 
-Workspace `cargo test` 274 green + 2 Postgres round-trips (`#[ignore]`,
+Workspace `cargo test` 328 green + 2 Postgres round-trips (`#[ignore]`,
 `QW_TEST_DATABASE_URL`) verified against a throwaway PG 16 — the accounts
 CRUD, and a full register → write → drop-all-sessions → relogin →
 read-back through `sqlx`. The shared `app/ui/index.html` carries the
@@ -94,14 +122,11 @@ against a throwaway PG on 2026-09-05.
 `../../../qw-bo/qw.sh web` installs it (default mode);
 `qw.knownby.work` (public, no Access) tunnels to `:8112`.
 
-Remaining, roughly in priority for a public host: email-verify (parked
-low-priority — see `todo-impl.md`; **when it lands the address is stored
-encrypted at rest, the same as the nickname — a keyed-BLAKE2b blind index
-for lookup plus an XChaCha20 cipher column, never plaintext — and it is a
-verify / notify channel only, never a passphrase reset**), the delta blob
-format, and the multi-user `/ledger/*` routes (NIP-QW12; need a per-account
-auth channel — a device subkey — before a many-identity box serves one
-identity's ledger to its replicas; the single-user host already serves them).
+Remaining, roughly in priority for a public host: the delta blob format
+(perf only), and the multi-user `/ledger/*` routes (NIP-QW12; need a
+per-account auth channel — a device subkey — before a many-identity box
+serves one identity's ledger to its replicas; the single-user host
+already serves them).
 
 - **Coordination-server list — per account + a public host default,
   built 2026-09-07 / -09-08.**

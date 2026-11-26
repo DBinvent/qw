@@ -1,0 +1,50 @@
+name: audit and geiger
+
+# cargo audit: known vulnerabilities (RustSec) in the dependencies. cargo geiger:
+# unsafe code in qw-node and qw-web (so in qw-protocol and qw-client-core too) and
+# in each crate they use, on the run's summary page.
+# On a push and a pull request (Dependabot's among them), and weekly: an advisory
+# can come out with nothing changed here.
+on:
+  push:
+    branches-ignore: ["dependabot/**"]   # their pull request runs it
+  pull_request:
+  schedule:
+    - cron: "17 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: audit-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+      # no Cargo.lock in the repository: the one a build would resolve today
+      - run: cargo generate-lockfile
+      - run: cargo audit
+
+  geiger:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-geiger
+      # a report, not a gate: the counts go to the log and the summary page
+      # the two binaries, each with the workspace crates it builds from; an absolute
+      # path, since cargo-geiger 0.14 refuses a relative --manifest-path
+      - run: |
+          for p in node app/server; do
+            cargo geiger --manifest-path "$PWD/$p/Cargo.toml" --output-format GitHubMarkdown | tee -a "$GITHUB_STEP_SUMMARY"
+          done

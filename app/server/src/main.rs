@@ -44,6 +44,9 @@ use serde::Deserialize;
 // master key per account wrapped by a KEK set. `main` runs it instead of
 // the single-user body when `QW_MULTIUSER` is set.
 mod multiuser;
+// [dot-dot] the layer both routers are wrapped in: a path holding `..` is
+// refused, 400.
+mod dot_dot;
 // These carry a little surface the routes never reach — operator
 // nickname re-index, some envelope/blob accessors the test suites assert
 // through, and `Unlocked::via` (which wrapping let a login in — for a
@@ -55,6 +58,12 @@ mod account_session;
 mod accounts;
 #[allow(dead_code)]
 mod envelope;
+// Optional Cloudflare Email Sending client for the multi-user host's
+// email-notify feature (`multiuser::{set_email, email_verify, ...}`).
+// Unused — and so `dead_code`-silenced — in the single-user binary, which
+// has no accounts to attach an address to.
+#[allow(dead_code)]
+mod mail;
 mod ratelimit;
 #[allow(dead_code)]
 mod unlock;
@@ -114,7 +123,7 @@ async fn main() {
 }
 
 fn router(web: Arc<Web>) -> Router {
-    Router::new()
+    let app = Router::new()
         .route("/", get(index))
         .route("/session", get(session_info))
         .route("/api/identity", post(identity))
@@ -148,7 +157,9 @@ fn router(web: Arc<Web>) -> Router {
         .route("/servers", get(host_servers_get))
         .route("/ledger/pull", post(ledger_pull))
         .route("/ledger/push", post(ledger_push))
-        .with_state(web)
+        .with_state(web);
+    // [dot-dot] a path holding `..` is refused before any route
+    crate::dot_dot::guarded(app)
 }
 
 /// The public bootstrap endpoint — a fresh client or the mobile app pulls

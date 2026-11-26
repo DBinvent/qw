@@ -1,8 +1,8 @@
 // "Get updates and news" signup.
 //
 // Generated file - the source of truth is
-// ../../user_mgmt/web/components/news/subscribe-form.tsx. Edit it there and
-// re-run `user_mgmt/web/sync.sh <this-app>`.
+// ../../signon/web/components/news/subscribe-form.tsx. Edit it there and
+// re-run `signon/web/sync.sh <this-app>`.
 //
 // Shape follows trust-atria-landing's WaitlistFooter: one field, one button,
 // the form replaced by a confirmation on success. What differs is what the

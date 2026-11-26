@@ -928,6 +928,32 @@
     </details>
   </section>
 
+  <!-- Multi-user qw-web only, same gating as #keys-section. Optional and
+       self-service: nothing above needs it, and there is still no email
+       reset - it is a verify / notify channel only. -->
+  <section id="email-section" hidden>
+    <p class="lead">Notify email (optional)</p>
+    <p class="muted">A place to hear "a recovery code was used" or similar -
+      never a way back into the account, and never required. Encrypted at
+      rest, the same as the nickname.</p>
+    <p class="muted" id="email-current" hidden></p>
+    <div class="row">
+      <input id="email-input" type="email" placeholder="you@example.com"
+             autocapitalize="none" autocorrect="off" spellcheck="false">
+      <button id="email-save" type="button">Save</button>
+    </div>
+    <div class="row" id="email-verify-row" hidden>
+      <input id="email-code" placeholder="6-digit code" inputmode="numeric"
+             autocomplete="one-time-code" maxlength="6">
+      <button id="email-verify-btn" type="button">Confirm</button>
+    </div>
+    <div class="row" id="email-manage-row" hidden>
+      <button id="email-resend" type="button" class="ghost">Resend code</button>
+      <button id="email-drop" type="button" class="ghost">Remove</button>
+    </div>
+    <p class="muted" id="email-status"></p>
+  </section>
+
   <section id="signout-section" hidden>
     <div class="muted">Signed in to this host. Signing out clears the session
       key from server memory; your records stay.</div>
@@ -2695,6 +2721,90 @@ document.getElementById('seed-reveal').onclick = async () => {
   }
 };
 
+// --- optional notify email (multi-user qw-web only) -----------------
+// Same self-gating idiom as showKeys(): `email_get` 401s on a single-user
+// build or a plain reload with no cookie yet, and the catch just leaves
+// #email-section hidden. Never a login or reset path - verify/notify only.
+async function showEmail() {
+  let state;
+  try {
+    state = await invoke('email_get');
+  } catch {
+    return;
+  }
+  renderEmail(state);
+  document.getElementById('email-section').hidden = false;
+}
+
+function renderEmail(state) {
+  const current = document.getElementById('email-current');
+  const input = document.getElementById('email-input');
+  if (state.email) {
+    current.hidden = false;
+    current.textContent = state.verified
+      ? `Confirmed: ${state.email}`
+      : `Pending confirmation: ${state.email}`;
+    input.value = state.email;
+  } else {
+    current.hidden = true;
+    input.value = '';
+  }
+  document.getElementById('email-verify-row').hidden = !state.pending;
+  document.getElementById('email-manage-row').hidden = !state.email;
+  document.getElementById('email-resend').hidden = state.verified;
+}
+
+document.getElementById('email-save').onclick = async () => {
+  const status = document.getElementById('email-status');
+  const email = document.getElementById('email-input').value.trim();
+  if (!email) { status.textContent = 'An address is required.'; return; }
+  status.textContent = 'Sending a code…';
+  try {
+    const state = await invoke('set_email', { email });
+    renderEmail(state);
+    status.textContent = 'Code sent - check your inbox and enter it below.';
+  } catch (e) {
+    status.textContent = String(e);
+  }
+};
+
+document.getElementById('email-verify-btn').onclick = async () => {
+  const status = document.getElementById('email-status');
+  const code = document.getElementById('email-code').value.trim();
+  if (!code) { status.textContent = 'Enter the code from the email.'; return; }
+  try {
+    const state = await invoke('email_verify', { code });
+    renderEmail(state);
+    document.getElementById('email-code').value = '';
+    status.textContent = 'Confirmed.';
+  } catch (e) {
+    status.textContent = String(e);
+  }
+};
+
+document.getElementById('email-resend').onclick = async () => {
+  const status = document.getElementById('email-status');
+  status.textContent = 'Sending a new code…';
+  try {
+    const state = await invoke('email_resend');
+    renderEmail(state);
+    status.textContent = 'A fresh code is on its way - the old one no longer works.';
+  } catch (e) {
+    status.textContent = String(e);
+  }
+};
+
+document.getElementById('email-drop').onclick = async () => {
+  const status = document.getElementById('email-status');
+  try {
+    const state = await invoke('email_drop');
+    renderEmail(state);
+    status.textContent = 'Removed.';
+  } catch (e) {
+    status.textContent = String(e);
+  }
+};
+
 // --- top navigation between pages ----------------------------------
 // The app is one HTML file; each "page" is a <div class="page"
 // data-page="…"> shown alone. The last one visited is remembered so a
@@ -2815,7 +2925,7 @@ async function boot() {
     await showContacts();
     await showServers();
     await showFilter();
-    if (multiUser) await showKeys();
+    if (multiUser) { await showKeys(); await showEmail(); }
     document.getElementById('auth').hidden = true;
     document.getElementById('app').hidden = false;
     // The hosted-key warning is a sign-in-time decision aid; once you are

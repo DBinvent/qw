@@ -1,7 +1,7 @@
-// Client for the updates-and-news mailing list (`user_mgmt::subscribe_router`).
+// Client for the updates-and-news mailing list (`signon::subscribe_router`).
 //
-// Generated file - the source of truth is ../../user_mgmt/web/lib/news-client.ts.
-// Edit it there and re-run `user_mgmt/web/sync.sh <this-app>`; a local edit
+// Generated file - the source of truth is ../../signon/web/lib/news-client.ts.
+// Edit it there and re-run `signon/web/sync.sh <this-app>`; a local edit
 // will be overwritten.
 //
 // Same relative-fetch rule as account-client.ts: the browser only ever talks

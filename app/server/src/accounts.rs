@@ -48,6 +48,12 @@ const AEAD_TAG_LEN: usize = 16;
 /// AAD on the nickname cipher — the row's own `account_id`, so a cipher
 /// cannot be lifted onto another row.
 const NICK_AAD: &[u8] = b"qw-web/accounts/nick-v1";
+/// Same idea for the optional email column, under its own domain tag so a
+/// cipher cannot be moved between the two columns either (`field_aad`).
+const EMAIL_AAD: &[u8] = b"qw-web/accounts/email-v1";
+/// `normalize_email`'s length cap — RFC 5321's own bound on the whole
+/// address.
+const MAX_EMAIL_LEN: usize = 254;
 
 /// The `accounts` table, declaratively. Applied by [`migrate`].
 const SCHEMA_YAML: &str = include_str!("accounts.schema.yaml");
@@ -63,12 +69,29 @@ pub struct AccountRecord {
     pub blob: Vec<u8>,
     pub created_at: u64,
     pub updated_at: u64,
+    /// Optional notify-only address, sealed like the nickname. `None`
+    /// until the holder adds one (self-service, post-registration — see
+    /// `server/multi-user.md`). Never a login path: nothing here is ever
+    /// read before a session already exists.
+    pub email_cipher: Option<Vec<u8>>,
+    /// Set only by `AccountStore::mark_email_verified` — the one path that
+    /// moves this from `None` to `Some`. A fresh or changed address always
+    /// clears it back to `None` first.
+    pub email_verified_at: Option<u64>,
+    /// Keyed BLAKE2b-256 of the pending confirmation code (`blind_index`
+    /// reused — the code is a short secret exactly like the nickname it
+    /// already hashes). Cleared once verified, replaced, or dropped.
+    pub email_verify_hash: Option<Vec<u8>>,
+    /// When the pending code was last (re)sent — the resend-rate-limit and
+    /// 24-hour expiry both read this.
+    pub email_verify_sent_at: Option<u64>,
 }
 
 impl AccountRecord {
     /// Build a record for a new account: normalise the nickname, derive the
     /// blind index, seal the nickname. `account_id` is minted by the caller
     /// (`register` needs it first, to bind it into the account blob's AAD).
+    /// No email at creation — it is always a later, self-service step.
     pub fn new(
         server_key: &[u8; SERVER_KEY_LEN],
         account_id: Uuid,
@@ -86,6 +109,10 @@ impl AccountRecord {
             blob,
             created_at: now,
             updated_at: now,
+            email_cipher: None,
+            email_verified_at: None,
+            email_verify_hash: None,
+            email_verify_sent_at: None,
         })
     }
 
@@ -94,6 +121,17 @@ impl AccountRecord {
     /// the login path.
     pub fn nick(&self, server_key: &[u8; SERVER_KEY_LEN]) -> Result<String, AccountError> {
         open_nick(server_key, &self.account_id, &self.nick_cipher)
+    }
+
+    /// The stored email, decrypted, or `None` if none was ever added. The
+    /// holder typed it themselves, so handing it back to their own
+    /// session is not new exposure — same reasoning as `nick`, just
+    /// reachable from a route rather than operator-only.
+    pub fn email(&self, server_key: &[u8; SERVER_KEY_LEN]) -> Result<Option<String>, AccountError> {
+        match &self.email_cipher {
+            Some(c) => open_email(server_key, &self.account_id, c).map(Some),
+            None => Ok(None),
+        }
     }
 }
 
@@ -130,24 +168,72 @@ pub fn nick_blind_index(
     Ok(blind_index(server_key, &normalize_nick(raw_nick)?))
 }
 
-fn nick_aead(server_key: &[u8; SERVER_KEY_LEN]) -> XChaCha20Poly1305 {
+/// Trim and lowercase; reject anything that is not plausibly
+/// `local@domain.tld`. Deliberately loose — the same "anything like an
+/// email" bar `multi-user.md` sets for the nickname — because this
+/// address is never a lookup key, only a notify channel: the cost of
+/// rejecting a real but unusual address is higher than the cost of
+/// accepting one that later bounces.
+pub fn normalize_email(raw: &str) -> Result<String, AccountError> {
+    let e = raw.trim().to_lowercase();
+    if e.is_empty() || e.len() > MAX_EMAIL_LEN || e.chars().any(char::is_whitespace) {
+        return Err(AccountError::EmailInvalid);
+    }
+    let Some((local, domain)) = e.split_once('@') else {
+        return Err(AccountError::EmailInvalid);
+    };
+    if local.is_empty() || domain.is_empty() || !domain.contains('.') || domain.contains('@') {
+        return Err(AccountError::EmailInvalid);
+    }
+    Ok(e)
+}
+
+/// Six digits, rejection-sampled so the low values are not marginally
+/// more likely — the bias would be tiny but costs nothing to avoid. The
+/// type-it-in email confirmation code (`multiuser::send_email_code`).
+pub fn generate_email_code() -> String {
+    loop {
+        let mut bytes = [0u8; 4];
+        OsRng.fill_bytes(&mut bytes);
+        let n = u32::from_le_bytes(bytes);
+        // 4_294_000_000 is the largest multiple of 1_000_000 below u32::MAX.
+        if n < 4_294_000_000 {
+            return format!("{:06}", n % 1_000_000);
+        }
+    }
+}
+
+/// Keyed purely by `server_key` — nothing column-specific in here, the
+/// domain separation lives entirely in `row_aad`'s tag.
+fn server_field_aead(server_key: &[u8; SERVER_KEY_LEN]) -> XChaCha20Poly1305 {
     XChaCha20Poly1305::new(Key::from_slice(server_key))
 }
 
-fn row_aad(account_id: &Uuid) -> Vec<u8> {
-    let mut aad = NICK_AAD.to_vec();
+/// `domain` (a `*_AAD` constant) plus the row's own `account_id`, so a
+/// cipher cannot be lifted onto another row *or* swapped onto the other
+/// sealed column under the same key.
+fn row_aad(domain: &[u8], account_id: &Uuid) -> Vec<u8> {
+    let mut aad = domain.to_vec();
     aad.extend_from_slice(account_id.as_bytes());
     aad
 }
 
-fn seal_nick(server_key: &[u8; SERVER_KEY_LEN], account_id: &Uuid, nick: &str) -> Vec<u8> {
+fn seal_field(
+    server_key: &[u8; SERVER_KEY_LEN],
+    domain: &[u8],
+    account_id: &Uuid,
+    plaintext: &str,
+) -> Vec<u8> {
     let mut nonce = [0u8; XNONCE_LEN];
     OsRng.fill_bytes(&mut nonce);
-    let aad = row_aad(account_id);
-    let mut ct = nick_aead(server_key)
+    let aad = row_aad(domain, account_id);
+    let mut ct = server_field_aead(server_key)
         .encrypt(
             XNonce::from_slice(&nonce),
-            Payload { msg: nick.as_bytes(), aad: &aad },
+            Payload {
+                msg: plaintext.as_bytes(),
+                aad: &aad,
+            },
         )
         .expect("XChaCha20-Poly1305 encryption of an in-memory buffer cannot fail");
     let mut out = Vec::with_capacity(XNONCE_LEN + ct.len());
@@ -156,9 +242,9 @@ fn seal_nick(server_key: &[u8; SERVER_KEY_LEN], account_id: &Uuid, nick: &str) -
     out
 }
 
-/// Decrypt a nickname sealed by [`seal_nick`].
-pub fn open_nick(
+fn open_field(
     server_key: &[u8; SERVER_KEY_LEN],
+    domain: &[u8],
     account_id: &Uuid,
     cipher: &[u8],
 ) -> Result<String, AccountError> {
@@ -166,11 +252,40 @@ pub fn open_nick(
         return Err(AccountError::Malformed);
     }
     let (nonce, ct) = cipher.split_at(XNONCE_LEN);
-    let aad = row_aad(account_id);
-    let pt = nick_aead(server_key)
+    let aad = row_aad(domain, account_id);
+    let pt = server_field_aead(server_key)
         .decrypt(XNonce::from_slice(nonce), Payload { msg: ct, aad: &aad })
         .map_err(|_| AccountError::Malformed)?;
     String::from_utf8(pt).map_err(|_| AccountError::Malformed)
+}
+
+fn seal_nick(server_key: &[u8; SERVER_KEY_LEN], account_id: &Uuid, nick: &str) -> Vec<u8> {
+    seal_field(server_key, NICK_AAD, account_id, nick)
+}
+
+/// Decrypt a nickname sealed by [`seal_nick`].
+pub fn open_nick(
+    server_key: &[u8; SERVER_KEY_LEN],
+    account_id: &Uuid,
+    cipher: &[u8],
+) -> Result<String, AccountError> {
+    open_field(server_key, NICK_AAD, account_id, cipher)
+}
+
+/// Seal an already-[`normalize_email`]d address under `server_key`,
+/// AAD-bound to `account_id` so it cannot be swapped onto another row or
+/// onto the nickname column.
+pub fn seal_email(server_key: &[u8; SERVER_KEY_LEN], account_id: &Uuid, email: &str) -> Vec<u8> {
+    seal_field(server_key, EMAIL_AAD, account_id, email)
+}
+
+/// Decrypt an email sealed by [`seal_email`].
+pub fn open_email(
+    server_key: &[u8; SERVER_KEY_LEN],
+    account_id: &Uuid,
+    cipher: &[u8],
+) -> Result<String, AccountError> {
+    open_field(server_key, EMAIL_AAD, account_id, cipher)
 }
 
 /// The store seam. Async because Postgres is; `Send + Sync` so it lives in
@@ -205,6 +320,27 @@ pub trait AccountStore: Send + Sync {
     /// Replace that list (first-boot seed from `QW_SERVERS`, or an operator
     /// edit).
     async fn set_host_servers(&self, servers: &[String]) -> Result<(), AccountError>;
+
+    /// Add, change, resend-for, or drop the optional notify email in one
+    /// write. `cipher`/`verify_hash`/`sent_at` all `Some` means "a pending
+    /// code now exists for this address"; all `None` means "remove the
+    /// address entirely" (`/api/email_drop`). Either way this call
+    /// **always clears `email_verified_at`** — a fresh or changed address
+    /// (including re-sending its own code) returns to pending; only
+    /// [`AccountStore::mark_email_verified`] may set it.
+    async fn set_email(
+        &self,
+        id: Uuid,
+        cipher: Option<Vec<u8>>,
+        verify_hash: Option<Vec<u8>>,
+        sent_at: Option<u64>,
+    ) -> Result<(), AccountError>;
+
+    /// Confirm the pending code: set `email_verified_at` and clear the
+    /// pending-code fields. The caller has already matched the presented
+    /// code against `email_verify_hash` — this method does not re-check
+    /// it, so it must only be called after that comparison succeeds.
+    async fn mark_email_verified(&self, id: Uuid) -> Result<(), AccountError>;
 }
 
 /// Apply `accounts.schema.yaml` to `db_url`. Call once at the entrypoint,
@@ -244,6 +380,11 @@ impl PgAccountStore {
     }
 }
 
+/// Every column `row_to_record` reads, shared by the three `SELECT`s below
+/// so the list cannot drift out of sync between them.
+const ACCOUNT_COLUMNS: &str = "account_id, nick_index, nick_cipher, wrappings, blob, created_at, \
+     updated_at, email_cipher, email_verified_at, email_verify_hash, email_verify_sent_at";
+
 fn row_to_record(row: &PgRow) -> Result<AccountRecord, AccountError> {
     Ok(AccountRecord {
         account_id: row.try_get("account_id").map_err(db)?,
@@ -256,12 +397,24 @@ fn row_to_record(row: &PgRow) -> Result<AccountRecord, AccountError> {
         blob: row.try_get("blob").map_err(db)?,
         created_at: row.try_get::<i64, _>("created_at").map_err(db)? as u64,
         updated_at: row.try_get::<i64, _>("updated_at").map_err(db)? as u64,
+        email_cipher: row.try_get("email_cipher").map_err(db)?,
+        email_verified_at: row
+            .try_get::<Option<i64>, _>("email_verified_at")
+            .map_err(db)?
+            .map(|v| v as u64),
+        email_verify_hash: row.try_get("email_verify_hash").map_err(db)?,
+        email_verify_sent_at: row
+            .try_get::<Option<i64>, _>("email_verify_sent_at")
+            .map_err(db)?
+            .map(|v| v as u64),
     })
 }
 
 #[async_trait]
 impl AccountStore for PgAccountStore {
     async fn insert(&self, rec: &AccountRecord) -> Result<(), AccountError> {
+        // Email columns are always NULL on insert — `AccountRecord::new`
+        // never sets them; adding one is always a later `set_email` call.
         sqlx::query(
             "INSERT INTO accounts \
              (account_id, nick_index, nick_cipher, wrappings, blob, created_at, updated_at) \
@@ -281,10 +434,9 @@ impl AccountStore for PgAccountStore {
     }
 
     async fn by_blind_index(&self, idx: &[u8]) -> Result<Vec<AccountRecord>, AccountError> {
-        let rows = sqlx::query(
-            "SELECT account_id, nick_index, nick_cipher, wrappings, blob, created_at, updated_at \
-             FROM accounts WHERE nick_index = $1 ORDER BY created_at LIMIT 5",
-        )
+        let rows = sqlx::query(&format!(
+            "SELECT {ACCOUNT_COLUMNS} FROM accounts WHERE nick_index = $1 ORDER BY created_at LIMIT 5"
+        ))
         .bind(idx)
         .fetch_all(&self.pool)
         .await
@@ -293,10 +445,9 @@ impl AccountStore for PgAccountStore {
     }
 
     async fn by_account_id(&self, id: Uuid) -> Result<Option<AccountRecord>, AccountError> {
-        let row = sqlx::query(
-            "SELECT account_id, nick_index, nick_cipher, wrappings, blob, created_at, updated_at \
-             FROM accounts WHERE account_id = $1",
-        )
+        let row = sqlx::query(&format!(
+            "SELECT {ACCOUNT_COLUMNS} FROM accounts WHERE account_id = $1"
+        ))
         .bind(id)
         .fetch_optional(&self.pool)
         .await
@@ -328,6 +479,51 @@ impl AccountStore for PgAccountStore {
             .await
             .map_err(db)?
             .rows_affected();
+        if n == 0 {
+            return Err(AccountError::NotFound);
+        }
+        Ok(())
+    }
+
+    async fn set_email(
+        &self,
+        id: Uuid,
+        cipher: Option<Vec<u8>>,
+        verify_hash: Option<Vec<u8>>,
+        sent_at: Option<u64>,
+    ) -> Result<(), AccountError> {
+        let n = sqlx::query(
+            "UPDATE accounts SET email_cipher = $2, email_verify_hash = $3, \
+             email_verify_sent_at = $4, email_verified_at = NULL, updated_at = $5 \
+             WHERE account_id = $1",
+        )
+        .bind(id)
+        .bind(&cipher)
+        .bind(&verify_hash)
+        .bind(sent_at.map(|v| v as i64))
+        .bind(unix_secs() as i64)
+        .execute(&self.pool)
+        .await
+        .map_err(db)?
+        .rows_affected();
+        if n == 0 {
+            return Err(AccountError::NotFound);
+        }
+        Ok(())
+    }
+
+    async fn mark_email_verified(&self, id: Uuid) -> Result<(), AccountError> {
+        let now = unix_secs() as i64;
+        let n = sqlx::query(
+            "UPDATE accounts SET email_verified_at = $2, email_verify_hash = NULL, \
+             email_verify_sent_at = NULL, updated_at = $2 WHERE account_id = $1",
+        )
+        .bind(id)
+        .bind(now)
+        .execute(&self.pool)
+        .await
+        .map_err(db)?
+        .rows_affected();
         if n == 0 {
             return Err(AccountError::NotFound);
         }
@@ -378,6 +574,9 @@ pub enum AccountError {
     Conflict,
     NotFound,
     Malformed,
+    /// `normalize_email` rejected the input — too short, no `@`, no `.`
+    /// in the domain part, or over the length cap.
+    EmailInvalid,
     /// `schema_guard_tokio` failed to parse or apply the schema.
     Migrate(String),
     Db(String),
@@ -391,6 +590,7 @@ impl std::fmt::Display for AccountError {
             Self::Conflict => f.write_str("that nickname is taken on this instance"),
             Self::NotFound => f.write_str("no such account"),
             Self::Malformed => f.write_str("stored nickname is malformed"),
+            Self::EmailInvalid => f.write_str("that does not look like an email address"),
             Self::Migrate(m) => write!(f, "schema migration: {m}"),
             Self::Db(m) => write!(f, "account store: {m}"),
         }
@@ -468,6 +668,37 @@ impl AccountStore for MemAccountStore {
         *self.1.lock().unwrap() = Some(servers.to_vec());
         Ok(())
     }
+    async fn set_email(
+        &self,
+        id: Uuid,
+        cipher: Option<Vec<u8>>,
+        verify_hash: Option<Vec<u8>>,
+        sent_at: Option<u64>,
+    ) -> Result<(), AccountError> {
+        let mut g = self.0.lock().unwrap();
+        let r = g
+            .iter_mut()
+            .find(|r| r.account_id == id)
+            .ok_or(AccountError::NotFound)?;
+        r.email_cipher = cipher;
+        r.email_verify_hash = verify_hash;
+        r.email_verify_sent_at = sent_at;
+        r.email_verified_at = None;
+        r.updated_at = unix_secs();
+        Ok(())
+    }
+    async fn mark_email_verified(&self, id: Uuid) -> Result<(), AccountError> {
+        let mut g = self.0.lock().unwrap();
+        let r = g
+            .iter_mut()
+            .find(|r| r.account_id == id)
+            .ok_or(AccountError::NotFound)?;
+        r.email_verified_at = Some(unix_secs());
+        r.email_verify_hash = None;
+        r.email_verify_sent_at = None;
+        r.updated_at = unix_secs();
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -522,6 +753,114 @@ mod tests {
         assert_eq!(rec.nick(&SK).unwrap(), "alice.doe");
         // bound to the row: another id does not open it
         assert!(open_nick(&SK, &Uuid::new_v4(), &rec.nick_cipher).is_err());
+    }
+
+    #[test]
+    fn normalize_email_trims_lowercases_and_rejects_the_obviously_wrong() {
+        assert_eq!(
+            normalize_email("  Alice@Example.COM ").unwrap(),
+            "alice@example.com"
+        );
+        for bad in [
+            "",
+            "   ",
+            "no-at-sign",
+            "@example.com",
+            "alice@",
+            "alice@nodot",
+            "a b@example.com",
+        ] {
+            assert!(
+                matches!(normalize_email(bad), Err(AccountError::EmailInvalid)),
+                "{bad:?}"
+            );
+        }
+        assert!(
+            normalize_email(&format!("a@{}.com", "x".repeat(260))).is_err(),
+            "over length cap"
+        );
+    }
+
+    #[test]
+    fn email_code_is_six_digits() {
+        for _ in 0..50 {
+            let code = generate_email_code();
+            assert_eq!(code.len(), 6, "{code}");
+            assert!(code.chars().all(|c| c.is_ascii_digit()), "{code}");
+        }
+    }
+
+    #[test]
+    fn email_cipher_round_trips_and_cannot_be_opened_as_a_nickname() {
+        let id = Uuid::new_v4();
+        let cipher = seal_email(&SK, &id, "alice@example.com");
+        assert_eq!(open_email(&SK, &id, &cipher).unwrap(), "alice@example.com");
+        // bound to the row
+        assert!(open_email(&SK, &Uuid::new_v4(), &cipher).is_err());
+        // bound to the field — the AAD differs from the nickname's, so a
+        // cipher cannot be swapped onto the other sealed column
+        assert!(open_nick(&SK, &id, &cipher).is_err());
+    }
+
+    #[tokio::test]
+    async fn set_email_is_pending_then_mark_verified_confirms_it() {
+        let store = MemAccountStore::default();
+        let rec = record("alice.doe");
+        let id = rec.account_id;
+        store.insert(&rec).await.unwrap();
+
+        let email = normalize_email("alice@example.com").unwrap();
+        let cipher = seal_email(&SK, &id, &email);
+        let code = generate_email_code();
+        let hash = blind_index(&SK, &code);
+        store
+            .set_email(id, Some(cipher), Some(hash.clone()), Some(1_000))
+            .await
+            .unwrap();
+
+        let got = store.by_account_id(id).await.unwrap().unwrap();
+        assert_eq!(
+            got.email(&SK).unwrap().as_deref(),
+            Some("alice@example.com")
+        );
+        assert_eq!(got.email_verified_at, None, "pending, not yet confirmed");
+        assert_eq!(got.email_verify_hash, Some(hash));
+
+        store.mark_email_verified(id).await.unwrap();
+        let got = store.by_account_id(id).await.unwrap().unwrap();
+        assert!(got.email_verified_at.is_some());
+        assert_eq!(
+            got.email_verify_hash, None,
+            "the pending code is cleared on success"
+        );
+
+        // set_email again (a changed address) returns to pending.
+        let cipher2 = seal_email(&SK, &id, "alice2@example.com");
+        store
+            .set_email(
+                id,
+                Some(cipher2),
+                Some(blind_index(&SK, "000000")),
+                Some(2_000),
+            )
+            .await
+            .unwrap();
+        let got = store.by_account_id(id).await.unwrap().unwrap();
+        assert_eq!(
+            got.email_verified_at, None,
+            "a changed address is pending again"
+        );
+
+        // set_email(None, None, None) drops it entirely.
+        store.set_email(id, None, None, None).await.unwrap();
+        let got = store.by_account_id(id).await.unwrap().unwrap();
+        assert_eq!(got.email(&SK).unwrap(), None);
+        assert_eq!(got.email_verify_hash, None);
+
+        assert!(matches!(
+            store.set_email(Uuid::new_v4(), None, None, None).await,
+            Err(AccountError::NotFound)
+        ));
     }
 
     #[tokio::test]

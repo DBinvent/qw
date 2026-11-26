@@ -1,0 +1,21 @@
+# cargo-make tasks (cargo install cargo-make): the dependency checks
+
+[tasks.audit]
+install_crate = "cargo-audit"
+command = "cargo"
+args = ["audit"]
+workspace = false
+description = "Known vulnerabilities (RustSec) in the dependencies Cargo.lock pins"
+
+[tasks.geiger]
+install_crate = "cargo-geiger"
+# the two binaries, each with the workspace crates it builds from; an absolute
+# path, since cargo-geiger 0.14 refuses a relative --manifest-path
+script = '''
+for p in node app/server; do cargo geiger --manifest-path "$PWD/$p/Cargo.toml"; done
+'''
+# a build of its own: geiger reads every dependency file in the target directory,
+# and an old build's can name a source file since deleted ("No such file")
+env = { CARGO_TARGET_DIR = "target/geiger" }
+workspace = false
+description = "Unsafe code in qw-node and qw-web and in each dependency they use"

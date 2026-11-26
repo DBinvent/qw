@@ -232,14 +232,47 @@ class TitleRewriter {
   }
 }
 
+/** `path` must start with "/". Set on a parsed URL rather than resolved
+ * against the origin, so a path like "//evil.example/x" stays a path on the
+ * backend instead of becoming a protocol-relative URL to another host. */
+function backendUrl(origin: string, path: string, search: string): URL {
+  const target = new URL(origin);
+  target.pathname = path;
+  target.search = search;
+  return target;
+}
+
+/** [dot-dot] Does the path of this URL - as given, between the host and "?" or "#" - hold "..",
+ * as sent or with its %xx escapes decoded (twice over)? Read from request.url, not new URL(), which
+ * resolves a ".." segment away */
+export function pathHasDotDot(rawUrl: string): boolean {
+  let p = rawUrl.replace(/^[a-z][a-z0-9+.-]*:\/\/[^/?#]*/i, "").split(/[?#]/)[0];
+  for (let i = 0; i < 3; i++) {
+    if (p.includes("..")) return true;
+    let d: string;
+    try {
+      d = decodeURIComponent(p);
+    } catch {
+      d = p.replace(/%2e/gi, ".");
+    }
+    if (d === p) return false;
+    p = d;
+  }
+  return p.includes("..");
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
+    // [dot-dot] a path holding ".." is refused, 400, before anything is served or forwarded
+    if (pathHasDotDot(request.url)) {
+      return new Response("bad path", { status: 400, headers: { "content-type": "text/plain; charset=utf-8" } });
+    }
     const url = new URL(request.url);
 
     if (url.pathname.startsWith("/api/")) {
       // The API server mounts the list at /news/*, knowing nothing about the
       // /api prefix, so it is stripped here rather than forwarded.
-      const target = new URL(url.pathname.slice(4) + url.search, env.BACKEND_ORIGIN);
+      const target = backendUrl(env.BACKEND_ORIGIN, url.pathname.slice(4), url.search);
       return fetch(new Request(target.toString(), request));
     }
 

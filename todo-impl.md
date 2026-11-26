@@ -904,6 +904,24 @@ the standing client / protocol gaps, roughly in order.
   (this is the simpler flat list, no ownership proof) and **broker-signed
   reviews** (the `source`/`level` vocabulary is deliberately the VC claim
   shape those will reuse).
+- ***Optional notify email on the multi-user host*** (2026-10-07 — was
+  "Low priority / deferred" below; see `app/server/multi-user.md` for the
+  full shape). `accounts.rs` gained four nullable columns
+  (`email_cipher`/`email_verified_at`/`email_verify_hash`/
+  `email_verify_sent_at`); the address is sealed under `server_key`
+  exactly like the nickname (`seal_email`/`open_email`, domain-separated
+  AAD so a cipher cannot cross columns), never stored in the clear. A
+  6-digit code, hashed with the nickname's own `blind_index`, confirms
+  it; `AccountStore::set_email` always resets `email_verified_at`, so
+  only a matched code can ever set it. `src/mail.rs` sends it via
+  Cloudflare Email Sending (`CF_ACCOUNT_ID`/`CF_EMAIL_TOKEN`/
+  `EMAIL_FROM`) — unconfigured is **not** a startup failure (§8: the host
+  must keep working with no mailer at all), so it logs the code instead.
+  `/api/{email,set_email,email_verify,email_resend,email_drop}` on the
+  multi-user host only (self-service, post-registration — nothing added
+  to `register` itself); a "Notify email" block on the Security page.
+  Still, as the register text has always said: **verify / notify only,
+  never a passphrase reset.**
 
 **Standing client / protocol gaps — the protocol is well ahead of the client:**
 
@@ -925,13 +943,6 @@ the standing client / protocol gaps, roughly in order.
 
 **Low priority / deferred (do not block the list above):**
 
-- **Email verification on the multi-user host** (was item 1, dropped down
-  2026-09-05). `qw-web`'s account is nick + passphrase with no email at
-  all; verification would mean *adding* one, for a "recovery used" notice
-  channel and account-takeover friction. Both are real but neither
-  blocks: rate-limiting covers the abuse case and the recovery code
-  covers lockout. A public host can add it later without reshaping
-  anything.
 - **Delta blob format** (perf only — `EncHistoryStore::append` and
   `persist_sync_state` re-seal the whole payload, O(ledger)). Fine until a
   real ledger makes it a problem.

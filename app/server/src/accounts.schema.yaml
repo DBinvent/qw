@@ -59,6 +59,30 @@ database:
                 type: bigint
                 constraint:
                   nullable: false
+            - column:
+                name: email_cipher
+                type: bytea
+                constraint:
+                  nullable: true
+                description: Optional notify-only address as XChaCha20-Poly1305 under server_key, AAD-bound to account_id and its own field tag. Null until the holder adds one. Verify or notify only, never a login or password-reset path.
+            - column:
+                name: email_verified_at
+                type: bigint
+                constraint:
+                  nullable: true
+                description: Unix seconds the pending code was confirmed. Null means unset or not yet verified; cleared back to null whenever the address changes.
+            - column:
+                name: email_verify_hash
+                type: bytea
+                constraint:
+                  nullable: true
+                description: Keyed BLAKE2b-256 of the pending confirmation code under server_key. Cleared once verified, replaced, or dropped.
+            - column:
+                name: email_verify_sent_at
+                type: bigint
+                constraint:
+                  nullable: true
+                description: Unix seconds the pending code was last sent - resend rate limit and 24 hour expiry both read this.
 
       - table:
           tableName: host_config
