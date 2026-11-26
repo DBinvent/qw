@@ -17,7 +17,7 @@ qw-client-core = { path = "../core" }
 qw-protocol = { path = "../../protocol" }
 # Matches the axum already resolved by qw-client-core's dev-deps, so the
 # workspace stays on one axum major.
-axum = "0.7"
+axum = "0.8"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
