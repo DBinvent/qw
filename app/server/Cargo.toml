@@ -40,7 +40,7 @@ unicode-normalization = "0.1"               # NFC the nickname before hashing
 # accounts.schema.yaml at startup, sqlx runs the queries.
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres", "uuid", "json"] }
 marg = "0.3"
-schema_guard_tokio = "1.10"
+schema_guard_tokio = "2.5"
 async-trait = "0.1"
 
 # Optional email-notify (src/mail.rs, multi-user only): Cloudflare Email
